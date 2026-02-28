@@ -13,10 +13,40 @@ Backend:
 
 
 # Version-2 : LLM-Powered Answering (True RAG)
+Now that we created a small pipeline, where we give text as input, and relevant top k chunks from the vector database, we are just returning the top k chunks, now lets use a actual llm to give a proper reasoning
+
+we have used : ##microsoft/Phi-3-mini-4k-instruct##, and it is taking so much long time
+it provides a decent reasoning by taking lot of time
+for now, we are just showing relevant chunks (top k)
 
 # Version-3 : Smarter Chunking (Token-based + Overlap)
+We were using a line in a paragraph as a chunk to store in our vector embeddings store, now we broke them into words and set a limit of 80 characters, with 40 characters overlap, to get relevant chunks, (concept used: sliding window)
+
+understanding importance of chunk length and overlap
+chunk length: too big, captures more context but leads to fewer chunks, making it heavy embedding, thereby containing multiple topics and too small, its more precise but may miss the context
+overlap: safe boundaries but creates redundancy
+
+chunk length: 80, overlap length: 40 worked the best
+
 
 # Version-4 : Two-Stage Retrieval (Re-Ranking)
+Stage-1: we were directly embedding the query as vector and getting sim score and returning top k chunks using similarity score
+Stage-2: Now to make it more precise, we select from those, we device a better matching algorithm with the query and top k chunks we have
+
+1. (what we are using now) checking how many words are common between query and chunk : 
+    Store each word of query in one map
+    string stream each word in chunk and check if its in the map
+    TC: O(n), but not very efficient
+
+2. checking sim score between each word of query and chunk : 
+    for each chunk (lets say n), we need to do sim score (lets say it takes O(1) time), each chunk has k words, and query has m words 
+    then TC: O(nxkxm), expensive
+
+3. Incorporating the modern concept of cross-encoders
+These are basically transformer based architecture which uses self attention and calculates scores for query and chunk to get a relevance score
+So we pass the query and each chunk/snippet to this transformer architecture and get relevant score and sort them based on that
+we get pre-trained models, we can plugin to get the scores, such as ##cross-encoder/ms-marco-MiniLM-L-12-v2##
+
 
 # Version-5 : Metadata-Aware Search (Filters & Scopes)
 

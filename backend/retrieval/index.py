@@ -13,15 +13,16 @@ class VectorIndex:
 
     def __init__(
         self,
+        dim: int,
         embeddings_path: str = "data/processed/embeddings.npy",
         metadata_path: str = "data/processed/metadata.json",
     ):
+        self.dim = dim
         self.embeddings_path = Path(embeddings_path)
         self.metadata_path = Path(metadata_path)
 
         self.embeddings: np.ndarray | None = None
         self.metadata: List[Dict] | None = None
-        self.dim: int | None = None
 
         self._load_index()
 
@@ -81,12 +82,13 @@ class VectorIndex:
                 return 1.0
             return (val - min_score) / (max_score - min_score)
 
-        relevance_threshold = 0.2  # keep only reasonably relevant chunks
+        relevance_threshold = 0.01  # keep only reasonably relevant chunks
 
         results: List[Dict] = []
         fallback_results: List[Dict] = []
 
         for doc_id, score, doc in sims[:top_k]:
+            print(f"[VectorIndex] Retrieved doc_id={doc_id}, score={score}")
             norm_score = float(normalize(score))
             snippet = doc["text"][:60].replace("\n", " ")
 

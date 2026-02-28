@@ -4,6 +4,7 @@ import numpy as np
 from backend.encoders.text_encoder import TextEncoder
 from backend.encoders.image_encoder import ImageEncoder
 from backend.retrieval.index import VectorIndex  # 👈 NEW
+from backend.retrieval.reranker import ReRanker
 from backend.reasoning.llm_reasoner import LLMReasoner
 
 
@@ -17,8 +18,13 @@ class MultimodalPipeline:
         # encoders
         self.text_encoder = TextEncoder()
         self.image_encoder = ImageEncoder()
-        # retrieval index (dummy for now)
-        self.index = VectorIndex()  # 👈 NEW
+
+       # retrieval index (stage 1)
+        self.index = VectorIndex(dim=768)
+
+        # re-ranking (stage 2)
+        self.reranker = ReRanker(enabled=True)
+
         # reasoning layer
         self.reasoner = LLMReasoner()  # 👈 NEW
 
@@ -57,13 +63,17 @@ class MultimodalPipeline:
         used_image = image_info is not None
 
         # 2) retrieve (dummy)
-        retrieved = self.index.search(text_embedding, top_k=5)  # 👈 NEW
-        print(f"[Pipeline] Retrieved {len(retrieved)} chunks")
+        initial_top_k=20
+        final_top_k=5
+        stage1_retrieved = self.index.search(text_embedding, top_k=initial_top_k)
+        print(f"[Pipeline] Retrieved {len(stage1_retrieved)} candidates from stage 1")
+        stage2_retrieved = self.reranker.rerank(query_text, candidates=stage1_retrieved, final_top_k=final_top_k)
+        print(f"[Pipeline] Retrieved {len(stage2_retrieved)} candidates from stage 2")
 
         # 3) reasoning (for now, simple rule-based summarizer)
         answer, reasoning_summary = self.reasoner.answer(
             query_text=query_text,
-            retrieved_chunks=retrieved,
+            retrieved_chunks=stage2_retrieved,
             image_info=image_info,
         )
         print("[Pipeline] Reasoning layer produced an answer")
@@ -71,7 +81,7 @@ class MultimodalPipeline:
         # 4) build final response
         return {
             "answer": answer,
-            "citations": retrieved,
+            "citations": stage2_retrieved,
             "reasoning_summary": (
                 f"Text embedding dim={text_embedding.shape[0]}, "
                 f"||embedding||={embedding_norm:.3f}. "
