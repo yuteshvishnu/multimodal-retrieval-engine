@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+numpy
+pydantic
+python-multipart
+
+torch
+sentence-transformers

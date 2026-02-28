@@ -1,0 +1,42 @@
+[
+  {
+    "id": "doc1_chunk0",
+    "path": "data/raw_docs/doc1.txt",
+    "text": "The human heart is a muscular organ responsible for pumping blood throughout the body."
+  },
+  {
+    "id": "doc1_chunk1",
+    "path": "data/raw_docs/doc1.txt",
+    "text": "It consists of four chambers: two atria and two ventricles."
+  },
+  {
+    "id": "doc1_chunk2",
+    "path": "data/raw_docs/doc1.txt",
+    "text": "Oxygen-poor blood returns from the body to the right atrium, moves to the right ventricle, and is pumped to the lungs."
+  },
+  {
+    "id": "doc1_chunk3",
+    "path": "data/raw_docs/doc1.txt",
+    "text": "Oxygen-rich blood returns from the lungs to the left atrium, moves to the left ventricle, and is pumped out to the rest of the body."
+  },
+  {
+    "id": "doc1_chunk4",
+    "path": "data/raw_docs/doc1.txt",
+    "text": "Common heart-related conditions include arrhythmia, heart failure, and coronary artery disease."
+  },
+  {
+    "id": "doc2_chunk0",
+    "path": "data/raw_docs/doc2.txt",
+    "text": "An X-ray image can reveal abnormalities in the lungs, bones, and heart silhouette."
+  },
+  {
+    "id": "doc2_chunk1",
+    "path": "data/raw_docs/doc2.txt",
+    "text": "For example, fluid in the lungs may appear as opaque regions, while healthy lung tissue looks darker."
+  },
+  {
+    "id": "doc2_chunk2",
+    "path": "data/raw_docs/doc2.txt",
+    "text": "Radiologists interpret these patterns along with patient symptoms to form a diagnosis."
+  }
+]
