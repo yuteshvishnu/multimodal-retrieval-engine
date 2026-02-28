@@ -31,18 +31,35 @@ class LLMReasoner:
                 "No retrieved chunks available.",
             )
 
-        # naive rule-based "answer": stitch snippets together
-        joined_snippets = " ".join(chunk["snippet"] for chunk in retrieved_chunks)
-        # truncate to avoid massive responses
-        joined_snippets = joined_snippets[:500]
+                # Build a bullet-style summary from the top chunks
+        bullets = []
+        max_bullets = 3  # keep it short and readable
+
+        for chunk in retrieved_chunks[:max_bullets]:
+            text = chunk["snippet"].strip()
+
+            # Trim to a reasonable length
+            if len(text) > 200:
+                text = text[:197].rsplit(" ", 1)[0] + "..."
+
+            # Ensure it starts with a capital and no trailing spaces
+            if text and not text[0].isupper():
+                text = text[0].upper() + text[1:]
+
+            bullets.append(f"• {text}")
+
+        if not bullets:
+            bullets_text = "(No relevant details could be extracted.)"
+        else:
+            bullets_text = "\n".join(bullets)
 
         prefix = "Based on the retrieved documents"
         if image_info:
             prefix += f" and the image you provided ({image_info})"
 
         answer = (
-            f"{prefix}, here is a summary related to your question "
-            f"'{query_text}':\n\n{joined_snippets}"
+            f"{prefix}, here is a brief summary related to your question "
+            f"'{query_text}':\n\n{bullets_text}"
         )
 
         ids = [chunk["id"] for chunk in retrieved_chunks]
