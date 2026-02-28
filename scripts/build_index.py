@@ -9,6 +9,45 @@ RAW_DOCS_DIR = Path("data/raw_docs")
 PROCESSED_DIR = Path("data/processed")  # later we’ll save index/metadata here
 
 
+def chunk_text_sliding(
+    text: str,
+    window_size: int = 120,
+    overlap: int = 40,
+) -> list[str]:
+    """
+    Split text into overlapping word windows.
+
+    Example:
+        window_size = 120, overlap = 40
+        -> chunks of ~120 words, where consecutive chunks share ~40 words.
+
+    This approximates token-based chunking without needing a tokenizer.
+    """
+    words = text.split()
+    if not words:
+        return []
+
+    chunks = []
+    start = 0
+    n = len(words)
+
+    while start < n:
+        end = min(start + window_size, n)
+        chunk_words = words[start:end]
+        print(f"Chunking text: {chunk_words}")
+        chunk_text = " ".join(chunk_words).strip()
+        if chunk_text:
+            chunks.append(chunk_text)
+
+        if end == n:
+            break
+
+        # move the window with overlap
+        start = end - overlap
+
+    return chunks
+
+
 def main():
     print("Building index from raw docs...")
     print(f"Reading from: {RAW_DOCS_DIR.resolve()}")
@@ -39,7 +78,12 @@ def main():
     for path in txt_files:
         text = path.read_text(encoding="utf-8")
         # Simple chunking: split on double newlines (paragraphs)
-        raw_chunks = [c.strip() for c in text.split("\n") if c.strip()]
+        raw_chunks = chunk_text_sliding(
+            text,
+            window_size=80,
+            overlap=40,
+        )
+
         print(f"Loaded {len(raw_chunks)} chunks from {path.name}")
 
         for idx, chunk in enumerate(raw_chunks):
