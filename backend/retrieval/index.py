@@ -55,7 +55,7 @@ class VectorIndex:
     
     
 
-    def search(self, query_vec: np.ndarray, top_k: int = 5) -> List[Dict]:
+    def search(self, query_vec: np.ndarray, top_k: int = 5, source_filter: List[str] | None = None) -> List[Dict]:
         """
         Brute-force cosine similarity search over all document embeddings.
         Returns a list of dicts sorted by similarity desc.
@@ -66,6 +66,12 @@ class VectorIndex:
         # compute cosine similarity against all docs
         sims: List[tuple[str, float, Dict]] = []
         for doc, doc_vec in zip(self.metadata, self.embeddings):
+            # If a source_filter is provided, skip docs not in it
+            if source_filter is not None:
+                doc_source = doc.get("source")
+                if doc_source not in source_filter:
+                    continue
+            
             sim = self._cosine_sim(query_vec, doc_vec)
             sims.append((doc["id"], sim, doc))
 
@@ -82,7 +88,7 @@ class VectorIndex:
                 return 1.0
             return (val - min_score) / (max_score - min_score)
 
-        relevance_threshold = 0.01  # keep only reasonably relevant chunks
+        relevance_threshold = 0.5  # keep only reasonably relevant chunks
 
         results: List[Dict] = []
         fallback_results: List[Dict] = []
@@ -92,10 +98,12 @@ class VectorIndex:
             norm_score = float(normalize(score))
             snippet = doc["text"][:60].replace("\n", " ")
 
+            print(f"doc, {doc}")
+
             entry = {
                 "id": doc_id,
                 "score": norm_score,
-                "source": "text_corpus",
+                "source": doc.get("source", "text_corpus"), # text_corpus is the default value
                 "snippet": snippet,
             }
 

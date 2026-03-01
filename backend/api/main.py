@@ -28,6 +28,7 @@ async def query_endpoint(
     query_text: str = Form(...),
     image: UploadFile | None = File(None),
     audio: UploadFile | None = File(None),
+    sources: str | None = Form(None),
 ):
     """
     Now:
@@ -39,10 +40,16 @@ async def query_endpoint(
     image_bytes = await image.read() if image is not None else None
     audio_bytes = await audio.read() if audio is not None else None
 
+    source_list: list[str] | None = None
+    if sources:
+        # e.g. "heart_notes, lungs_intro"
+        source_list = [s.strip() for s in sources.split(",") if s.strip()]
+
     result = pipeline.run(
         query_text=query_text,
         image_bytes=image_bytes,
         audio_bytes=audio_bytes,
+        sources=source_list,
     )
 
     # for now pipeline returns a plain dict already

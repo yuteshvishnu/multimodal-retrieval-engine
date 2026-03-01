@@ -33,6 +33,7 @@ class MultimodalPipeline:
         query_text: str,
         image_bytes: Optional[bytes] = None,
         audio_bytes: Optional[bytes] = None,
+        sources: list[str] | None = None,
     ) -> dict:
         print(f"[Pipeline] Received query: {query_text!r}")
         """
@@ -64,8 +65,8 @@ class MultimodalPipeline:
 
         # 2) retrieve (dummy)
         initial_top_k=20
-        final_top_k=5
-        stage1_retrieved = self.index.search(text_embedding, top_k=initial_top_k)
+        final_top_k=8
+        stage1_retrieved = self.index.search(text_embedding, top_k=initial_top_k, source_filter=sources)
         print(f"[Pipeline] Retrieved {len(stage1_retrieved)} candidates from stage 1")
         stage2_retrieved = self.reranker.rerank(query_text, candidates=stage1_retrieved, final_top_k=final_top_k)
         print(f"[Pipeline] Retrieved {len(stage2_retrieved)} candidates from stage 2")

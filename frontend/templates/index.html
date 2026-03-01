@@ -1,41 +1,42 @@
 <!DOCTYPE html>
 
 /**
- * Form for multimodal query
- * 
- * action="/query" → will hit a POST /query endpoint on your FastAPI server
- *
- * enctype="multipart/form-data" → required to upload files
- *
- * query_text, image, audio → match the names we’ll use in the backend
- */
+* Form for multimodal query
+*
+* action="/query" → will hit a POST /query endpoint on your FastAPI server
+*
+* enctype="multipart/form-data" → required to upload files
+*
+* query_text, image, audio → match the names we’ll use in the backend
+*/
 <html>
-  <head>
-    <meta charset="UTF-8" />
-    <title>Multimodal Retrieval & Reasoning</title>
-  </head>
-  <body>
-    <h1>Multimodal Retrieval & Reasoning</h1>
 
-    <form action="/query" method="post" enctype="multipart/form-data">
-      <div>
-        <label for="query_text">Question:</label>
-        <input type="text" id="query_text" name="query_text" required />
-      </div>
+<head>
+  <meta charset="UTF-8" />
+  <title>Multimodal Retrieval & Reasoning</title>
+</head>
 
-      <div>
-        <label for="image">Image (optional):</label>
-        <input type="file" id="image" name="image" accept="image/*" />
-      </div>
+<body>
+  <h1>Multimodal Retrieval & Reasoning</h1>
 
-      <!-- <div>
-        <label for="audio">Audio (optional):</label>
-        <input type="file" id="audio" name="audio" accept="audio/*" />
-      </div> -->
+  <form id="query-form" method="post" action="/query" enctype="multipart/form-data">
+    <div>
+      <label for="query_text">Question:</label>
+      <input type="text" id="query_text" name="query_text" />
+    </div>
 
-      <div>
-        <button type="submit">Ask</button>
-      </div>
-    </form>
-  </body>
+    <div>
+      <label for="sources">Sources (optional, comma-separated):</label>
+      <input type="text" id="sources" name="sources" placeholder="e.g. heart_notes, lungs_intro" />
+    </div>
+
+    <div>
+      <label for="image">Image (optional):</label>
+      <input type="file" id="image" name="image" accept="image/*" />
+    </div>
+
+    <button type="submit">Ask</button>
+  </form>
+</body>
+
 </html>

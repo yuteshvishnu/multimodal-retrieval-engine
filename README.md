@@ -49,8 +49,21 @@ we get pre-trained models, we can plugin to get the scores, such as ##cross-enco
 
 
 # Version-5 : Metadata-Aware Search (Filters & Scopes)
+current chunk meta 
+    {"id": "doc1_chunk0", "path": "...", "text": "..."}
+
+This is not enough to 
+    1. filter by document type
+    2. group by source
+    3. only search in this subset
+
+Improvement
+    1. we shall start by adding a source field in the metadata : to understand from where we got this chunk
+    2. lets add source filter, to basically generate output based on only selected sources: what we are doing here, is setting the input space from which we need our answers
+    3. we provided an option to user to select the sources from which they want the output, along with provided source information from the selected chunks
 
 # Version-6 : Evaluation & Metrics (Text-Only Bench)
+
 
 # Version-7 : Relevance Feedback Loop (Learning from Thumbs-Up/Down)
 

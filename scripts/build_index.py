@@ -11,8 +11,8 @@ PROCESSED_DIR = Path("data/processed")  # later we’ll save index/metadata here
 
 def chunk_text_sliding(
     text: str,
-    window_size: int = 120,
-    overlap: int = 40,
+    window_size: int = 10,
+    overlap: int = 5,
 ) -> list[str]:
     """
     Split text into overlapping word windows.
@@ -30,6 +30,7 @@ def chunk_text_sliding(
     chunks = []
     start = 0
     n = len(words)
+    print(f"n={n}")
 
     while start < n:
         end = min(start + window_size, n)
@@ -80,19 +81,21 @@ def main():
         # Simple chunking: split on double newlines (paragraphs)
         raw_chunks = chunk_text_sliding(
             text,
-            window_size=80,
-            overlap=40,
+            window_size=10,
+            overlap=5,
         )
 
         print(f"Loaded {len(raw_chunks)} chunks from {path.name}")
 
         for idx, chunk in enumerate(raw_chunks):
             doc_id = f"{path.stem}_chunk{idx}"
+            print(f"path,{path.stem}")
             docs.append(
                 {
                     "id": doc_id,
                     "path": str(path),
                     "text": chunk,
+                    "source": str(path.stem)
                 }
             )
             chunk_count += 1
@@ -119,7 +122,8 @@ def main():
         metadata.append({
             "id": doc["id"],
             "path": doc["path"],
-            "text": doc["text"]
+            "text": doc["text"],
+            "source": doc["source"]
         })
 
         print(f"- Embedded {doc['id']} (dim={vec.shape[0]})")
