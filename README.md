@@ -69,6 +69,27 @@ We were able to create a basic work flow we can see certain results based on the
 
 
 # Version-7 : Relevance Feedback Loop (Learning from Thumbs-Up/Down)
+If we don’t have a real model that learns, what is the point of collecting user feedback?
+    Currently this are the steps we follow to get relevant context chunks
+        1. top 10 chunks
+        2. rerank and get top 5
+        3. filter score by threshold
+    
+    But we need to know
+        1. is threshold too high or too low ?
+        2. do users want fever chunks
+        3. are we retriveing irrevalent items frequently, how to get better?
+
+    Improvements to
+        1. tuning threshold
+        2. tune re-rank behavior, choose the right logic
+        3. understand chunk issues and make it better
+        4. provide live performance metrics
+        5. real training data for future LLM Integration
+        6. making it production ready
+
+
+
 
 # Version-8 : Multi-Collection / Namespace Support
 

@@ -1,11 +1,21 @@
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from backend.api.schemas import QueryResponse
 
 from backend.core.pipeline import MultimodalPipeline  # 👈 NEW
+from backend.feedback.logger import log_feedback
 
 app = FastAPI()
+
+class FeedbackPayload(BaseModel):
+    query_text: str
+    answer: str
+    citations: list[dict]
+    rating: str  # "up" or "down"
+    comment: str | None = None
+    metadata: dict | None = None
 
 templates = Jinja2Templates(directory="frontend/templates")
 
@@ -54,3 +64,29 @@ async def query_endpoint(
 
     # for now pipeline returns a plain dict already
     return JSONResponse(result)
+
+@app.post("/feedback")
+async def feedback_endpoint(payload: FeedbackPayload):
+    """
+    Accepts feedback on a given answer/citations and logs it to disk.
+    """
+    # Basic validation of rating
+    rating = payload.rating.lower()
+    if rating not in ("up", "down"):
+        return JSONResponse(
+            {"status": "error", "message": "rating must be 'up' or 'down'"},
+            status_code=400,
+        )
+
+    event = {
+        "query_text": payload.query_text,
+        "answer": payload.answer,
+        "citations": payload.citations,
+        "rating": rating,
+        "comment": payload.comment,
+        "metadata": payload.metadata or {},
+    }
+
+    log_feedback(event)
+
+    return {"status": "ok"}
