@@ -1,42 +1,146 @@
 [
   {
-    "id": "doc1_chunk0",
-    "path": "data/raw_docs/doc1.txt",
-    "text": "The human heart is a muscular organ responsible for pumping blood throughout the body."
+    "id": "heart_notes_chunk0",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "The human heart is a muscular organ responsible for pumping",
+    "source": "heart_notes"
   },
   {
-    "id": "doc1_chunk1",
-    "path": "data/raw_docs/doc1.txt",
-    "text": "It consists of four chambers: two atria and two ventricles."
+    "id": "heart_notes_chunk1",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "muscular organ responsible for pumping blood throughout the body. It",
+    "source": "heart_notes"
   },
   {
-    "id": "doc1_chunk2",
-    "path": "data/raw_docs/doc1.txt",
-    "text": "Oxygen-poor blood returns from the body to the right atrium, moves to the right ventricle, and is pumped to the lungs."
+    "id": "heart_notes_chunk2",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "blood throughout the body. It consists of four chambers: two",
+    "source": "heart_notes"
   },
   {
-    "id": "doc1_chunk3",
-    "path": "data/raw_docs/doc1.txt",
-    "text": "Oxygen-rich blood returns from the lungs to the left atrium, moves to the left ventricle, and is pumped out to the rest of the body."
+    "id": "heart_notes_chunk3",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "consists of four chambers: two atria and two ventricles. Oxygen-poor",
+    "source": "heart_notes"
   },
   {
-    "id": "doc1_chunk4",
-    "path": "data/raw_docs/doc1.txt",
-    "text": "Common heart-related conditions include arrhythmia, heart failure, and coronary artery disease."
+    "id": "heart_notes_chunk4",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "atria and two ventricles. Oxygen-poor blood returns from the body",
+    "source": "heart_notes"
   },
   {
-    "id": "doc2_chunk0",
-    "path": "data/raw_docs/doc2.txt",
-    "text": "An X-ray image can reveal abnormalities in the lungs, bones, and heart silhouette."
+    "id": "heart_notes_chunk5",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "blood returns from the body to the right atrium, moves",
+    "source": "heart_notes"
   },
   {
-    "id": "doc2_chunk1",
-    "path": "data/raw_docs/doc2.txt",
-    "text": "For example, fluid in the lungs may appear as opaque regions, while healthy lung tissue looks darker."
+    "id": "heart_notes_chunk6",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "to the right atrium, moves to the right ventricle, and",
+    "source": "heart_notes"
   },
   {
-    "id": "doc2_chunk2",
-    "path": "data/raw_docs/doc2.txt",
-    "text": "Radiologists interpret these patterns along with patient symptoms to form a diagnosis."
+    "id": "heart_notes_chunk7",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "to the right ventricle, and is pumped to the lungs.",
+    "source": "heart_notes"
+  },
+  {
+    "id": "heart_notes_chunk8",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "is pumped to the lungs. Oxygen-rich blood returns from the",
+    "source": "heart_notes"
+  },
+  {
+    "id": "heart_notes_chunk9",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "Oxygen-rich blood returns from the lungs to the left atrium,",
+    "source": "heart_notes"
+  },
+  {
+    "id": "heart_notes_chunk10",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "lungs to the left atrium, moves to the left ventricle,",
+    "source": "heart_notes"
+  },
+  {
+    "id": "heart_notes_chunk11",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "moves to the left ventricle, and is pumped out to",
+    "source": "heart_notes"
+  },
+  {
+    "id": "heart_notes_chunk12",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "and is pumped out to the rest of the body.",
+    "source": "heart_notes"
+  },
+  {
+    "id": "heart_notes_chunk13",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "the rest of the body. Common heart-related conditions include arrhythmia,",
+    "source": "heart_notes"
+  },
+  {
+    "id": "heart_notes_chunk14",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "Common heart-related conditions include arrhythmia, heart failure, and coronary artery",
+    "source": "heart_notes"
+  },
+  {
+    "id": "heart_notes_chunk15",
+    "path": "data/raw_docs/heart_notes.txt",
+    "text": "heart failure, and coronary artery disease.",
+    "source": "heart_notes"
+  },
+  {
+    "id": "lung_notes_chunk0",
+    "path": "data/raw_docs/lung_notes.txt",
+    "text": "An X-ray image can reveal abnormalities in the lungs, bones,",
+    "source": "lung_notes"
+  },
+  {
+    "id": "lung_notes_chunk1",
+    "path": "data/raw_docs/lung_notes.txt",
+    "text": "abnormalities in the lungs, bones, and heart silhouette. For example,",
+    "source": "lung_notes"
+  },
+  {
+    "id": "lung_notes_chunk2",
+    "path": "data/raw_docs/lung_notes.txt",
+    "text": "and heart silhouette. For example, fluid in the lungs may",
+    "source": "lung_notes"
+  },
+  {
+    "id": "lung_notes_chunk3",
+    "path": "data/raw_docs/lung_notes.txt",
+    "text": "fluid in the lungs may appear as opaque regions, while",
+    "source": "lung_notes"
+  },
+  {
+    "id": "lung_notes_chunk4",
+    "path": "data/raw_docs/lung_notes.txt",
+    "text": "appear as opaque regions, while healthy lung tissue looks darker.",
+    "source": "lung_notes"
+  },
+  {
+    "id": "lung_notes_chunk5",
+    "path": "data/raw_docs/lung_notes.txt",
+    "text": "healthy lung tissue looks darker. Radiologists interpret these patterns along",
+    "source": "lung_notes"
+  },
+  {
+    "id": "lung_notes_chunk6",
+    "path": "data/raw_docs/lung_notes.txt",
+    "text": "Radiologists interpret these patterns along with patient symptoms to form",
+    "source": "lung_notes"
+  },
+  {
+    "id": "lung_notes_chunk7",
+    "path": "data/raw_docs/lung_notes.txt",
+    "text": "with patient symptoms to form a diagnosis.",
+    "source": "lung_notes"
   }
 ]

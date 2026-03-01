@@ -1,0 +1,12 @@
+[
+  {
+    "query": "What does the heart do in the body?",
+    "expected_source": "heart_notes",
+    "expected_name_contains": "heart"
+  },
+  {
+    "query": "What does healthy lungs look like?",
+    "expected_source": "lung_notes",
+    "expected_name_contains": "lung"
+  }
+]

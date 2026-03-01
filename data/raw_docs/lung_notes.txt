@@ -1,0 +1,3 @@
+An X-ray image can reveal abnormalities in the lungs, bones, and heart silhouette.
+For example, fluid in the lungs may appear as opaque regions, while healthy lung tissue looks darker.
+Radiologists interpret these patterns along with patient symptoms to form a diagnosis.

@@ -63,6 +63,9 @@ Improvement
     3. we provided an option to user to select the sources from which they want the output, along with provided source information from the selected chunks
 
 # Version-6 : Evaluation & Metrics (Text-Only Bench)
+We were able to create a basic work flow we can see certain results based on the input space and query asked, but we dont have specific metrics to evaluate 
+    1. verifying if correct source is used
+    2. verifying if correct snippet is part of output
 
 
 # Version-7 : Relevance Feedback Loop (Learning from Thumbs-Up/Down)

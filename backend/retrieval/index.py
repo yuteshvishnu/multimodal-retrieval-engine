@@ -78,6 +78,10 @@ class VectorIndex:
         # sort by similarity descending
         sims.sort(key=lambda x: x[1], reverse=True)
 
+        # If source filtering (or empty index) yields no candidates, avoid max/min on empty list.
+        if not sims:
+            return []
+
         # Normalize scores to 0–1 range
         raw_scores = [s for (_, s, _) in sims]
         max_score = max(raw_scores)
@@ -97,8 +101,6 @@ class VectorIndex:
             print(f"[VectorIndex] Retrieved doc_id={doc_id}, score={score}")
             norm_score = float(normalize(score))
             snippet = doc["text"][:60].replace("\n", " ")
-
-            print(f"doc, {doc}")
 
             entry = {
                 "id": doc_id,
