@@ -55,7 +55,7 @@ class VectorIndex:
     
     
 
-    def search(self, query_vec: np.ndarray, top_k: int = 5, source_filter: List[str] | None = None) -> List[Dict]:
+    def search(self, query_vec: np.ndarray, top_k: int = 5, source_filter: List[str] | None = None, collection_filter: List[str] | None = None) -> List[Dict]:
         """
         Brute-force cosine similarity search over all document embeddings.
         Returns a list of dicts sorted by similarity desc.
@@ -70,6 +70,12 @@ class VectorIndex:
             if source_filter is not None:
                 doc_source = doc.get("source")
                 if doc_source not in source_filter:
+                    continue
+
+             # If a collection_filter is provided, skip docs not in it
+            if collection_filter is not None:
+                doc_collection = doc.get("collection")
+                if doc_collection not in collection_filter:
                     continue
             
             sim = self._cosine_sim(query_vec, doc_vec)

@@ -92,8 +92,13 @@ If we don’t have a real model that learns, what is the point of collecting use
 
 
 # Version-8 : Multi-Collection / Namespace Support
+Till now we have this single point of data dump, where we have all sources from which we generate the chunks, but as we build, we require bigger buckets which consists of specific files
+
+1. we added an option to incldue a specific collection first, and then the source to search inside of collection, giving more control to the user to specific select the sources or context from which we need the model to answer
+
 
 # Version-9 : Polished UX: Rich Text UI + Citation Viewer
+
 
 # Version-10 : Multimodal Extension (Text + Image Retrieval)
 

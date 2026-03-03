@@ -5,7 +5,7 @@ import json
 
 from backend.encoders.text_encoder import TextEncoder  # we’ll use this soon
 
-RAW_DOCS_DIR = Path("data/raw_docs")
+RAW_DOCS_DIR = Path("data/raw_docs/medical_notes/")
 PROCESSED_DIR = Path("data/processed")  # later we’ll save index/metadata here
 
 
@@ -87,6 +87,13 @@ def main():
 
         print(f"Loaded {len(raw_chunks)} chunks from {path.name}")
 
+        # Collection name
+        parent_name = path.parent.name
+        if parent_name == "raw_docs":
+            collection = "default"
+        else:
+            collection = parent_name
+
         for idx, chunk in enumerate(raw_chunks):
             doc_id = f"{path.stem}_chunk{idx}"
             print(f"path,{path.stem}")
@@ -95,7 +102,8 @@ def main():
                     "id": doc_id,
                     "path": str(path),
                     "text": chunk,
-                    "source": str(path.stem)
+                    "source": str(path.stem),
+                    "collection": collection
                 }
             )
             chunk_count += 1
@@ -123,7 +131,8 @@ def main():
             "id": doc["id"],
             "path": doc["path"],
             "text": doc["text"],
-            "source": doc["source"]
+            "source": doc["source"],
+            "collection": doc["collection"]
         })
 
         print(f"- Embedded {doc['id']} (dim={vec.shape[0]})")
