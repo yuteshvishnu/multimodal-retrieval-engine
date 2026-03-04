@@ -81,8 +81,8 @@ def main():
         # Simple chunking: split on double newlines (paragraphs)
         raw_chunks = chunk_text_sliding(
             text,
-            window_size=10,
-            overlap=5,
+            window_size=40,
+            overlap=10,
         )
 
         print(f"Loaded {len(raw_chunks)} chunks from {path.name}")

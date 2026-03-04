@@ -1,6 +1,6 @@
-# Multimodal Retrieval and Reasoning Engine
+# Version-1: Multimodal Retrieval and Reasoning Engine
 
-# Version-1 : Basic Text Semantic Search + Bullet Summary
+# Version-1.1 : Basic Text Semantic Search + Bullet Summary
 we build a basic architecture
 
 Frontend: takes text as input (like a search bar), and gives relevant output
@@ -12,14 +12,14 @@ Backend:
     5. return in points
 
 
-# Version-2 : LLM-Powered Answering (True RAG)
+# Version-1.2 : LLM-Powered Answering (True RAG)
 Now that we created a small pipeline, where we give text as input, and relevant top k chunks from the vector database, we are just returning the top k chunks, now lets use a actual llm to give a proper reasoning
 
 we have used : ##microsoft/Phi-3-mini-4k-instruct##, and it is taking so much long time
 it provides a decent reasoning by taking lot of time
 for now, we are just showing relevant chunks (top k)
 
-# Version-3 : Smarter Chunking (Token-based + Overlap)
+# Version-1.3 : Smarter Chunking (Token-based + Overlap)
 We were using a line in a paragraph as a chunk to store in our vector embeddings store, now we broke them into words and set a limit of 80 characters, with 40 characters overlap, to get relevant chunks, (concept used: sliding window)
 
 understanding importance of chunk length and overlap
@@ -29,7 +29,7 @@ overlap: safe boundaries but creates redundancy
 chunk length: 80, overlap length: 40 worked the best
 
 
-# Version-4 : Two-Stage Retrieval (Re-Ranking)
+# Version-1.4 : Two-Stage Retrieval (Re-Ranking)
 Stage-1: we were directly embedding the query as vector and getting sim score and returning top k chunks using similarity score
 Stage-2: Now to make it more precise, we select from those, we device a better matching algorithm with the query and top k chunks we have
 
@@ -48,7 +48,7 @@ So we pass the query and each chunk/snippet to this transformer architecture and
 we get pre-trained models, we can plugin to get the scores, such as ##cross-encoder/ms-marco-MiniLM-L-12-v2##
 
 
-# Version-5 : Metadata-Aware Search (Filters & Scopes)
+# Version-1.5 : Metadata-Aware Search (Filters & Scopes)
 current chunk meta 
     {"id": "doc1_chunk0", "path": "...", "text": "..."}
 
@@ -62,13 +62,13 @@ Improvement
     2. lets add source filter, to basically generate output based on only selected sources: what we are doing here, is setting the input space from which we need our answers
     3. we provided an option to user to select the sources from which they want the output, along with provided source information from the selected chunks
 
-# Version-6 : Evaluation & Metrics (Text-Only Bench)
+# Version-1.6 : Evaluation & Metrics (Text-Only Bench)
 We were able to create a basic work flow we can see certain results based on the input space and query asked, but we dont have specific metrics to evaluate 
     1. verifying if correct source is used
     2. verifying if correct snippet is part of output
 
 
-# Version-7 : Relevance Feedback Loop (Learning from Thumbs-Up/Down)
+# Version-1.7 : Relevance Feedback Loop (Learning from Thumbs-Up/Down)
 If we don’t have a real model that learns, what is the point of collecting user feedback?
     Currently this are the steps we follow to get relevant context chunks
         1. top 10 chunks
@@ -91,16 +91,16 @@ If we don’t have a real model that learns, what is the point of collecting use
 
 
 
-# Version-8 : Multi-Collection / Namespace Support
+# Version-1.8 : Multi-Collection / Namespace Support
 Till now we have this single point of data dump, where we have all sources from which we generate the chunks, but as we build, we require bigger buckets which consists of specific files
 
 1. we added an option to incldue a specific collection first, and then the source to search inside of collection, giving more control to the user to specific select the sources or context from which we need the model to answer
 
 
-# Version-9 : Polished UX: Rich Text UI + Citation Viewer
+# Version-1.9 : Polished UX: Rich Text UI + Citation Viewer
 Providing a better UI experience with better layout
 
-# Version-10 : Multimodal Extension (Text + Image Retrieval)
+# Version-1.10 : Multimodal Extension (Text + Image Retrieval)
 Now that we completed the flow for the text, we shall do for the image, 
 
 It does not change the value, only the type and how it is stored.
@@ -124,3 +124,44 @@ Raw Image Bytes
 
 
   This concludes the basic skeleton implementation of a working multi-modal RAG based approach for Text + Image inputs
+
+# Summary of Version-1
+
+## Complete Life-cycle
+In the First version of our RAG modal, we were able to create a personal CHATGPT Based model, 
+    1. A UI which provides answers to user queries based on pre-stored data
+    2. Allows users to choose the sources from which they would like the model to give the output
+    3. Output includes relevant answer + its relevant reasoning + related citations from the sources
+
+## Concepts used
+ 1. Chunk based (limit + overlap configured, sliding window pattern) tokens stored in vector array database (dim = 768)
+ 2. query encoding and similarity finding using loat(a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8)), to get top 20 tokens
+ 3. then concept of re-ranking: term-based heuristic on the candidates to get final top 5 candidates
+ 4. reason through online groq model
+
+ ## Models used
+ sentence transformer: all-mpnet-base-v2
+ reasoning: llama-3.1-8b-instant
+
+## Evaluation Metrics
+Used RAGAS score to below metric scores and final overal score, tests used : 3
+
+
+Faithfulness         : 0.5333
+Relevancy            : 0.8713
+Context Precision    : 0.4444
+------------------------------------------
+OVERALL RAGAS SCORE  : 0.5689
+
+INSIGHT:
+- Issue Detected: Low Faithfulness suggests hallucinations. Check context chunks.
+
+## Conclusion
+It is clearly evident that our RAG modal still requires better statistics in terms of performance, and that would be the goal of version-2 of this project
+
+# Version-2: RAG Performance Improvements
+
+// CURRENTLY IN PROGRESS
+
+
+

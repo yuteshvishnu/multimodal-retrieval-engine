@@ -1,9 +1,10 @@
 from typing import Optional
 import numpy as np
+import torch
 
 from backend.encoders.text_encoder import TextEncoder
 from backend.encoders.image_encoder import ImageEncoder
-from backend.retrieval.index import VectorIndex  # 👈 NEW
+from backend.retrieval.index import VectorIndex
 from backend.retrieval.reranker import ReRanker
 from backend.reasoning.llm_reasoner import LLMReasoner
 
@@ -11,7 +12,7 @@ from backend.reasoning.llm_reasoner import LLMReasoner
 class MultimodalPipeline:
     """
     Orchestrates the multimodal retrieval + reasoning.
-    For now this is just a stub that returns a dummy answer.
+    Updated to handle Cloud-Hybrid LLM reasoning without crashing.
     """
 
     def __init__(self):
@@ -19,14 +20,14 @@ class MultimodalPipeline:
         self.text_encoder = TextEncoder()
         self.image_encoder = ImageEncoder()
 
-       # retrieval index (stage 1)
+        # retrieval index (stage 1)
         self.index = VectorIndex()
 
         # re-ranking (stage 2)
         self.reranker = ReRanker(enabled=True)
 
         # reasoning layer
-        self.reasoner = LLMReasoner()  # 👈 NEW
+        self.reasoner = LLMReasoner()
 
     def run(
         self,
@@ -38,28 +39,25 @@ class MultimodalPipeline:
     ) -> dict:
         """
         Main entry point:
-
-        - Encode text query (if provided)
-        - Encode image (if provided)
-        - Combine signals into a single query vector
-        - Stage 1: vector search
-        - Stage 2: rerank
-        - Reasoning: build answer + summary
+        - Encode signals
+        - Stage 1 Search
+        - Stage 2 Rerank
+        - Cloud/Local Reasoning
         """
 
-        # 1) encode query text (if present and non-empty)
+        # 1) encode query text
         text_embedding = None
         if query_text is not None and query_text.strip():
             text_embedding = self.text_encoder.encode(query_text)
 
-        # 2) encode query image (if present)
+        # 2) encode query image
         image_embedding = None
         image_info = None
         if image_bytes is not None:
             image_embedding = self.image_encoder.encode(image_bytes)
             image_info = "Image provided with the query"
 
-        # 3) make sure we have at least one signal
+        # 3) validate input
         if text_embedding is None and image_embedding is None:
             return {
                 "answer": "Please provide a question or an image.",
@@ -67,7 +65,7 @@ class MultimodalPipeline:
                 "reasoning_summary": "No query text or image provided.",
             }
 
-        # 4) build a single query vector
+        # 4) build query vector
         query_vecs = []
         if text_embedding is not None:
             query_vecs.append(text_embedding)
@@ -76,7 +74,7 @@ class MultimodalPipeline:
 
         combined_query_vec = np.mean(query_vecs, axis=0)
 
-        # 5) Stage 1: vector search (wider pool)
+        # 5) Stage 1: vector search
         stage1_top_k = 20
         stage1_candidates = self.index.search(
             combined_query_vec,
@@ -89,7 +87,7 @@ class MultimodalPipeline:
         # 6) Stage 2: rerank
         final_top_k = 5
         retrieved = self.reranker.rerank(
-            query_text=query_text or "",  # empty string if None
+            query_text=query_text or "",
             candidates=stage1_candidates,
             final_top_k=final_top_k,
         )
@@ -101,6 +99,16 @@ class MultimodalPipeline:
             retrieved_chunks=retrieved,
             image_info=image_info,
         )
+
+        # --- UPDATED DEVICE LOGGING ---
+        # We use a safe check here to prevent the 'bool' object has no attribute 'model' error
+        if hasattr(self.reasoner, 'client') and self.reasoner.client:
+            print(f"[Pipeline] Inference completed via Cloud API ({self.reasoner.model_name})")
+        elif hasattr(self.reasoner, 'generator') and self.reasoner.generator and hasattr(self.reasoner.generator, 'model'):
+            device = self.reasoner.generator.model.device
+            print(f"[Pipeline] Inference completed via Local model on: {device}")
+        else:
+            print("[Pipeline] Inference completed (Rule-based or unknown mode)")
 
         return {
             "answer": answer,
