@@ -1,48 +1,113 @@
 <!DOCTYPE html>
-
-/**
-* Form for multimodal query
-*
-* action="/query" → will hit a POST /query endpoint on your FastAPI server
-*
-* enctype="multipart/form-data" → required to upload files
-*
-* query_text, image, audio → match the names we’ll use in the backend
-*/
 <html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Multimodal Retrieval & Reasoning</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
 
-<head>
-  <meta charset="UTF-8" />
-  <title>Multimodal Retrieval & Reasoning</title>
-</head>
+  <body>
+    <h1>Multimodal Retrieval &amp; Reasoning</h1>
 
-<body>
-  <h1>Multimodal Retrieval & Reasoning</h1>
+    <form
+      id="query-form"
+      method="post"
+      action="/query"
+      enctype="multipart/form-data"
+    >
+      <div>
+        <label for="query_text">Question:</label>
+        <input type="text" id="query_text" name="query_text" />
+      </div>
 
-  <form id="query-form" method="post" action="/query" enctype="multipart/form-data">
-    <div>
-      <label for="query_text">Question:</label>
-      <input type="text" id="query_text" name="query_text" />
-    </div>
+      <div>
+        <label for="collections">Collections (optional, comma-separated):</label>
+        <input
+          type="text"
+          id="collections"
+          name="collections"
+          placeholder="e.g. medical_notes, research_papers"
+        />
+      </div>
 
-    <div>
-      <label for="collections">Collections (optional, comma-separated):</label>
-      <input type="text" id="collections" name="collections" placeholder="e.g. medical_notes, research_papers" />
-    </div>
+      <div>
+        <label for="sources">Sources (optional, comma-separated):</label>
+        <input
+          type="text"
+          id="sources"
+          name="sources"
+          placeholder="e.g. heart_notes, lungs_intro"
+        />
+      </div>
 
+      <div>
+        <label for="image">Image (optional):</label>
+        <input type="file" id="image" name="image" accept="image/*" />
+      </div>
 
-    <div>
-      <label for="sources">Sources (optional, comma-separated):</label>
-      <input type="text" id="sources" name="sources" placeholder="e.g. heart_notes, lungs_intro" />
-    </div>
+      <button type="submit">Ask</button>
+    </form>
 
-    <div>
-      <label for="image">Image (optional):</label>
-      <input type="file" id="image" name="image" accept="image/*" />
-    </div>
+    <hr />
 
-    <button type="submit">Ask</button>
-  </form>
-</body>
+    <h2>Answer</h2>
+    <pre id="answer"></pre>
 
+    <h3>Citations</h3>
+    <ul id="citations"></ul>
+
+    <h3>Reasoning Summary</h3>
+    <pre id="reasoning"></pre>
+
+    <script>
+      const form = document.getElementById("query-form");
+      const answerEl = document.getElementById("answer");
+      const citationsEl = document.getElementById("citations");
+      const reasoningEl = document.getElementById("reasoning");
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        answerEl.textContent = "Loading...";
+        citationsEl.innerHTML = "";
+        reasoningEl.textContent = "";
+
+        const formData = new FormData(form);
+
+        try {
+          const response = await fetch("/query", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!response.ok) {
+            answerEl.textContent = `Error: ${response.status} ${response.statusText}`;
+            return;
+          }
+
+          const data = await response.json();
+
+          answerEl.textContent = data.answer ?? "(no answer)";
+          reasoningEl.textContent = data.reasoning_summary ?? "";
+
+          citationsEl.innerHTML = "";
+          if (Array.isArray(data.citations)) {
+            for (const c of data.citations) {
+              const li = document.createElement("li");
+              const score =
+                typeof c.score === "number"
+                  ? c.score.toFixed(3)
+                  : String(c.score);
+              li.textContent =
+                `[${c.id}] score=${score} (source=${c.source}) — ${c.snippet}`;
+              citationsEl.appendChild(li);
+            }
+          }
+        } catch (err) {
+          console.error(err);
+          answerEl.textContent = "Error: could not reach server.";
+        }
+      });
+    </script>
+  </body>
 </html>

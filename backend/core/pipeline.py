@@ -20,7 +20,7 @@ class MultimodalPipeline:
         self.image_encoder = ImageEncoder()
 
        # retrieval index (stage 1)
-        self.index = VectorIndex(dim=768)
+        self.index = VectorIndex()
 
         # re-ranking (stage 2)
         self.reranker = ReRanker(enabled=True)
@@ -30,64 +30,80 @@ class MultimodalPipeline:
 
     def run(
         self,
-        query_text: str,
+        query_text: str | None,
         image_bytes: Optional[bytes] = None,
         audio_bytes: Optional[bytes] = None,
         sources: list[str] | None = None,
         collections: list[str] | None = None,
     ) -> dict:
-        print(f"[Pipeline] Received query: {query_text!r}")
         """
-        Current behavior:
-        - encode the query text into an embedding
-        - call the vector index to get dummy retrieved chunks
-        - return a dummy answer + retrieved citations
+        Main entry point:
+
+        - Encode text query (if provided)
+        - Encode image (if provided)
+        - Combine signals into a single query vector
+        - Stage 1: vector search
+        - Stage 2: rerank
+        - Reasoning: build answer + summary
         """
 
-        # 1) encode text
-        text_embedding: np.ndarray = self.text_encoder.encode(query_text)
-        print(f"[Pipeline] Text embedding dim={text_embedding.shape[0]}")
-        embedding_norm = float(np.linalg.norm(text_embedding))
+        # 1) encode query text (if present and non-empty)
+        text_embedding = None
+        if query_text is not None and query_text.strip():
+            text_embedding = self.text_encoder.encode(query_text)
 
-        # 1.2 encode image
-        print(f"[Pipeline] Image bytes: {image_bytes}")
+        # 2) encode query image (if present)
         image_embedding = None
-        if image_bytes:
-            image_embedding = self.image_encoder.encode(image_bytes)
-            print(f"[Pipeline] Image embedding dim={image_embedding.shape[0]}")
-        else:
-            print("[Pipeline] No image provided")
-
         image_info = None
+        if image_bytes is not None:
+            image_embedding = self.image_encoder.encode(image_bytes)
+            image_info = "Image provided with the query"
+
+        # 3) make sure we have at least one signal
+        if text_embedding is None and image_embedding is None:
+            return {
+                "answer": "Please provide a question or an image.",
+                "citations": [],
+                "reasoning_summary": "No query text or image provided.",
+            }
+
+        # 4) build a single query vector
+        query_vecs = []
+        if text_embedding is not None:
+            query_vecs.append(text_embedding)
         if image_embedding is not None:
-            image_info = "image embedding computed"
+            query_vecs.append(image_embedding)
 
-        used_image = image_info is not None
+        combined_query_vec = np.mean(query_vecs, axis=0)
 
-        # 2) retrieve (dummy)
-        initial_top_k=20
-        final_top_k=8
-        stage1_retrieved = self.index.search(text_embedding, top_k=initial_top_k, source_filter=sources, collection_filter=collections)
-        print(f"[Pipeline] Retrieved {len(stage1_retrieved)} candidates from stage 1")
-        stage2_retrieved = self.reranker.rerank(query_text, candidates=stage1_retrieved, final_top_k=final_top_k)
-        print(f"[Pipeline] Retrieved {len(stage2_retrieved)} candidates from stage 2")
+        # 5) Stage 1: vector search (wider pool)
+        stage1_top_k = 20
+        stage1_candidates = self.index.search(
+            combined_query_vec,
+            top_k=stage1_top_k,
+            source_filter=sources,
+            collection_filter=collections,
+        )
+        print(f"[Pipeline] Stage 1 retrieved {len(stage1_candidates)} candidates")
 
-        # 3) reasoning (for now, simple rule-based summarizer)
+        # 6) Stage 2: rerank
+        final_top_k = 5
+        retrieved = self.reranker.rerank(
+            query_text=query_text or "",  # empty string if None
+            candidates=stage1_candidates,
+            final_top_k=final_top_k,
+        )
+        print(f"[Pipeline] Stage 2 re-ranked to {len(retrieved)} final chunks")
+
+        # 7) reasoning
         answer, reasoning_summary = self.reasoner.answer(
-            query_text=query_text,
-            retrieved_chunks=stage2_retrieved,
+            query_text=query_text or "",
+            retrieved_chunks=retrieved,
             image_info=image_info,
         )
-        print("[Pipeline] Reasoning layer produced an answer")
 
-        # 4) build final response
         return {
             "answer": answer,
-            "citations": stage2_retrieved,
-            "reasoning_summary": (
-                f"Text embedding dim={text_embedding.shape[0]}, "
-                f"||embedding||={embedding_norm:.3f}. "
-                + reasoning_summary
-            ),
-            "used_image": used_image,
+            "citations": retrieved,
+            "reasoning_summary": reasoning_summary,
         }

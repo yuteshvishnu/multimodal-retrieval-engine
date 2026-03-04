@@ -13,7 +13,7 @@ class VectorIndex:
 
     def __init__(
         self,
-        dim: int,
+        dim: int = 768,
         embeddings_path: str = "data/processed/embeddings.npy",
         metadata_path: str = "data/processed/metadata.json",
     ):

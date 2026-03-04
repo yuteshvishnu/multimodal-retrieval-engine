@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -8,6 +9,7 @@ from backend.core.pipeline import MultimodalPipeline  # 👈 NEW
 from backend.feedback.logger import log_feedback
 
 app = FastAPI()
+app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
 
 class FeedbackPayload(BaseModel):
     query_text: str
@@ -35,25 +37,17 @@ def serve_home(request: Request):
 
 @app.post("/query", response_model=QueryResponse)
 async def query_endpoint(
-    query_text: str = Form(...),
+    query_text: str | None = Form(None),
     image: UploadFile | None = File(None),
     audio: UploadFile | None = File(None),
     sources: str | None = Form(None),
     collections: str | None = Form(None),
 ):
-    """
-    Now:
-    - read file bytes (if present)
-    - pass everything to the multimodal pipeline
-    - return pipeline result
-    """
-
     image_bytes = await image.read() if image is not None else None
     audio_bytes = await audio.read() if audio is not None else None
 
     source_list: list[str] | None = None
     if sources:
-        # e.g. "heart_notes, lungs_intro"
         source_list = [s.strip() for s in sources.split(",") if s.strip()]
 
     collection_list: list[str] | None = None
@@ -65,10 +59,9 @@ async def query_endpoint(
         image_bytes=image_bytes,
         audio_bytes=audio_bytes,
         sources=source_list,
-        collections=collection_list
+        collections=collection_list,
     )
 
-    # for now pipeline returns a plain dict already
     return JSONResponse(result)
 
 @app.post("/feedback")
