@@ -74,6 +74,11 @@ button {
   color: #555;
 }
 
+.tables-used {
+  color: #555;
+  font-size: 0.9rem;
+}
+
 /* results */
 pre {
   background: #f5f5f5;

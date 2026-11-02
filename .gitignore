@@ -15,6 +15,9 @@ data/**/*.sqlite
 # ...except the small practice database (45 KB)
 !data/text_to_sql/retail_store/retail_store.sqlite
 
+# Table embedding index (rebuilt automatically)
+data/**/table_embeddings.npz
+
 # React: installed packages and build output
 frontend/node_modules/
 frontend/dist/

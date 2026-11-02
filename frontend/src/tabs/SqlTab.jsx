@@ -36,6 +36,12 @@ export default function SqlTab() {
 
       {status && <p className="status">{status}</p>}
 
+      {result?.tables?.length > 0 && (
+        <p className="tables-used">
+          Tables used: {result.tables.join(", ")}
+        </p>
+      )}
+
       {result?.sql && (
         <>
           <h3>SQL</h3>

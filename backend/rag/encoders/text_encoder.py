@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
@@ -19,3 +21,12 @@ class TextEncoder:
         """
         emb = self.model.encode([text])  # shape: (1, dim)
         return emb[0].astype("float32")
+
+
+@lru_cache(maxsize=None)
+def get_text_encoder() -> TextEncoder:
+    """
+    One shared encoder for the whole app, so RAG (Version-1) and table search
+    (Version-3) don't each load the same model into memory.
+    """
+    return TextEncoder()

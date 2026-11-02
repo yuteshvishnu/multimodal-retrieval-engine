@@ -43,16 +43,16 @@ def load_descriptions(desc_dir: Path) -> Dict[str, Dict[str, dict]]:
 
 def annotated_schema(
     conn: sqlite3.Connection, alias: str, descriptions: Dict[str, Dict[str, dict]]
-) -> Tuple[str, List[str]]:
+) -> Tuple[Dict[str, str], List[str]]:
     """
     Builds CREATE TABLE statements for one attached database, with each column's
     description as a comment, e.g.
 
         order_date TEXT,  -- date the order was placed; stored as TEXT in MM/DD/YYYY ...
 
-    Returns (schema_text, warnings).
+    Returns ({table_name: statement}, warnings).
     """
-    statements, warnings = [], []
+    statements, warnings = {}, []
     tables = [
         row[0]
         for row in conn.execute(
@@ -104,13 +104,28 @@ def annotated_schema(
         for i, (definition, comment) in enumerate(lines):
             comma = "," if i < len(lines) - 1 else ""
             body.append(f"    {definition}{comma}" + (f"  -- {comment}" if comment else ""))
-        statements.append(f"CREATE TABLE {_quote(table)} (\n" + "\n".join(body) + "\n);")
+        statements[table] = f"CREATE TABLE {_quote(table)} (\n" + "\n".join(body) + "\n);"
 
     known_tables = {t.lower() for t in tables}
     for extra in sorted(set(descriptions) - known_tables):
         warnings.append(f"{extra}.csv: no such table in the database")
 
-    return "\n\n".join(statements), warnings
+    return statements, warnings
+
+
+def table_document(table: str, columns: List[str], table_desc: Dict[str, dict] | None) -> str:
+    """
+    One short line describing a table, used for embedding-based table search (Version-3).
+    Built from the table name, its column names and their descriptions, e.g.
+
+        Table orders: order id (unique id of the order), order date (date the order was placed), ...
+    """
+    parts = []
+    for column in columns:
+        name = column.replace("_", " ")
+        meaning = (table_desc or {}).get(column.lower(), {}).get("column_description", "")
+        parts.append(f"{name} ({meaning})" if meaning and meaning.lower() != name.lower() else name)
+    return f"Table {table.replace('_', ' ')}: " + ", ".join(parts)
 
 
 def _comment(desc: dict, col_type: str) -> str:

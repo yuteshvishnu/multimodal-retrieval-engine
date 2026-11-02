@@ -1,4 +1,4 @@
-from backend.rag.encoders.text_encoder import TextEncoder
+from backend.rag.encoders.text_encoder import get_text_encoder
 from backend.rag.retrieval.index import VectorIndex
 from backend.rag.retrieval.reranker import ReRanker
 from backend.rag.reasoning.llm_reasoner import LLMReasoner
@@ -11,8 +11,8 @@ class RAGPipeline:
     """
 
     def __init__(self):
-        # encoder
-        self.text_encoder = TextEncoder()
+        # encoder (shared with Text-to-SQL table search)
+        self.text_encoder = get_text_encoder()
 
         # retrieval index (stage 1)
         self.index = VectorIndex()

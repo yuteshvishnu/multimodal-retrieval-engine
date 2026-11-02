@@ -19,6 +19,7 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 # Groq models (see what your key can use: https://console.groq.com/docs/models)
 GROQ_MODEL_RAG = "openai/gpt-oss-20b"
 GROQ_MODEL_SQL = "openai/gpt-oss-120b"
+GROQ_MODEL_SUMMARY = "openai/gpt-oss-120b"  # offline table summaries (Version-3)
 
 # Hugging Face: RAG evaluation scripts
 HF_TOKEN = os.getenv("HF_TOKEN", "")

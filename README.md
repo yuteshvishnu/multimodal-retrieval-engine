@@ -14,6 +14,7 @@ LLM-powered systems that answer questions **only from our own data**, built in v
 - [Getting Started](#getting-started)
 - [Version-1: RAG over Text Documents](#version-1-target)
 - [Version-2: LLM-Powered Text-to-SQL System](#version-2-llm-powered-text-to-sql-system)
+- [Version-3: Scaling to Large Databases](#version-3-scaling-to-large-databases)
 - [Models](#models)
 
 ## Goal
@@ -44,7 +45,9 @@ multimodal-retrieval-engine/
 │       ├── pipeline.py      #   question → SQL → result
 │       ├── sql_generator.py #   LLM writes the SQL
 │       ├── database.py      #   loads .sqlite files, runs SQL read-only
-│       └── descriptions.py  #   reads database descriptions, adds them to the schema
+│       ├── descriptions.py  #   reads database descriptions, adds them to the schema
+│       ├── schema_index.py  #   Version-3: finds relevant tables with embeddings
+│       └── table_summaries.py # Version-3: LLM-written table summaries (offline)
 ├── frontend/                # React app (Vite) with two tabs
 │   └── src/tabs/            #   RagTab.jsx, SqlTab.jsx
 ├── data/
@@ -109,6 +112,10 @@ Open **http://localhost:8000** and pick a tab: **RAG (Version-1)** or **Text-to-
 |---|---|
 | Rebuild the RAG index after changing docs | `python -m scripts.rag.build_index` |
 | Score Text-to-SQL on the practice questions | `python -m scripts.text_to_sql.evaluate` |
+| Check table picking only (no LLM calls) | `python -m scripts.text_to_sql.evaluate --retrieval-only` |
+| Compare with sending every table | `python -m scripts.text_to_sql.evaluate --full-schema` |
+| Summarize new/changed tables (LLM), then embed | `python -m scripts.text_to_sql.build_schema_index` |
+| Re-embed only, no LLM calls | `python -m scripts.text_to_sql.build_schema_index --skip-summaries` |
 | API docs (auto-generated) | http://localhost:8000/docs |
 
 ---
@@ -369,8 +376,55 @@ For each question, the model's SQL and the correct SQL both run on the database 
 | One attempt only | A failing query is not corrected | Retry with the error message |
 | "List all tables" returns nothing | Tables live in attached databases, not `main` | Expose a table-list view to the model |
 | Only data questions | "What do these tables mean?" can't be answered with SQL | Let the model answer in words from the schema |
-| Full schema every time | Too large for BIRD's bigger databases | Send only relevant tables (schema linking) |
+| Full schema every time | Too large for BIRD's bigger databases | Solved in Version-3: send only relevant tables |
 | No conversation memory | Follow-ups like "sort that by city" don't work | Pass previous question + SQL |
+
+---
+
+## Version-3: Scaling to Large Databases
+
+Version-2 sends the **whole schema** with every question. Fine for 10 tables, not for real databases with hundreds.
+
+### Open Questions
+
+**1. What goes wrong if we paste all 500 tables into every prompt?**
+The LLM confuses similar tables (`orders` vs `order_items`), the schema can overflow the context window, accuracy drops, and every query gets slower and more expensive.
+
+**2. How do we send only the relevant tables?**
+Index tables **once, offline**; then per question, **first pick the top-k tables, then write SQL** with only those.
+
+**3. Can we pick tables without an LLM reading all 500 summaries?**
+Yes, with **embeddings** (RAG applied to schemas, like Version-1): compare the question with each table's embedding in milliseconds. An LLM re-pick (20 → 5) can be added later if needed.
+
+**4. Is a list of column names a real summary?**
+No. It says what columns exist, not what the table **means**. People ask in business words ("revenue", "spent"), so an LLM writes a real summary per table.
+
+**5. Won't summaries go stale if they mention other tables?**
+Yes, so each summary describes **only its own table**. Links between tables come from the live foreign keys.
+
+### How It Works
+
+```mermaid
+flowchart LR
+    Q["Question"] --> E["Embed question"]
+    I["Table summaries + embeddings<br/>built once, offline"] --> S
+    E --> S["Top-4 closest tables"]
+    S --> B["+ bridge tables"]
+    B --> L["LLM writes SQL<br/>with only these tables"]
+```
+
+- **Offline (`build_schema_index`):** the LLM writes a summary of each table from its schema, descriptions and sample rows: what a row is, what it answers, the words people use. Summaries naming other tables are rejected and rewritten. Only new or changed tables are summarized again. Summaries are saved to an editable `table_summaries.json`, then embedded.
+- **Per question:** pick the 4 closest tables, then add **bridge tables** (linked to 2+ picked tables, e.g. `orders` for "revenue by category"). Only those go to the LLM, and the UI shows which ones.
+
+### Results (practice database, table picking only)
+
+| Setting | Right tables picked | Tables sent |
+|---|---|---|
+| Top-3 | 19/20 | 3.3 of 10 |
+| **Top-4 (default)** | **20/20** | **4.5 of 10** |
+| Full schema (Version-2) | 20/20 | 10 of 10 |
+
+LLM summaries vs column names: **same picks**, slightly better ranking (needed tables rank 1.74 vs 1.82 on average). 10 tables is too few to show a real difference; re-test on BIRD.
 
 ---
 
@@ -381,5 +435,7 @@ For each question, the model's SQL and the correct SQL both run on the database 
 | Version-1 | Embeddings | `all-mpnet-base-v2` | Local (sentence-transformers) |
 | Version-1 | Answer writing | `openai/gpt-oss-20b` | Groq |
 | Version-2 | SQL generation | `openai/gpt-oss-120b` | Groq |
+| Version-3 | Table search (embeddings) | `all-mpnet-base-v2` (shared with Version-1) | Local (sentence-transformers) |
+| Version-3 | Table summaries (offline) | `openai/gpt-oss-120b` | Groq |
 
 Model names are set in `backend/config.py`. To see which models your Groq key can use, check the [Groq models page](https://console.groq.com/docs/models).
