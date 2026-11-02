@@ -1,5 +1,5 @@
 """
-Text-to-SQL step 6: what Rexie knows about each table, shown in the Tables view, and adding a new
+Text-to-SQL Version-6: what Rexie knows about each table, shown in the Tables view, and adding a new
 .sqlite database without restarting the server.
 """
 import math

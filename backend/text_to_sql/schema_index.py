@@ -1,5 +1,5 @@
 """
-Text-to-SQL step 3: find the tables relevant to a question with embeddings (RAG applied to schemas).
+Text-to-SQL Version-3: find the tables relevant to a question with embeddings (RAG applied to schemas).
 
 Offline, once per database:
     each table's one-line summary -> embedding, saved next to the database

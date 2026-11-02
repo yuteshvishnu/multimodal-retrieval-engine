@@ -20,13 +20,13 @@ TOP_K_TABLES = 4
 
 class TextToSQLPipeline:
     """
-    Question -> pick relevant tables (embeddings) -> confirm the meaning with the user (step 5)
+    Question -> pick relevant tables (embeddings) -> confirm the meaning with the user (Version-5)
     -> SQL (LLM, in rounds) -> checks -> result table.
 
     interpret(): up to 3 meanings for the user to pick from (1 LLM call per set of options).
     run(meaning=...): writes SQL that follows the meaning the user picked.
 
-    SQL rounds (step 4), with a hard stop of MAX_LLM_CALLS_PER_QUESTION calls
+    SQL rounds (Version-4), with a hard stop of MAX_LLM_CALLS_PER_QUESTION calls
     (SQL_CALLS_PER_ROUND calls per round, both set in backend/config.py):
       round 1: each SQL is checked, then run. At least two with the same result -> done
                (high confidence if all agree, medium if only some do).
@@ -34,7 +34,7 @@ class TextToSQLPipeline:
                involved. Any two answers agree -> done (medium). Otherwise -> the latest
                valid answer (low confidence). Stop.
 
-    use_retrieval=False sends the full schema instead (steps 1-2 behaviour), for comparison.
+    use_retrieval=False sends the full schema instead (versions 1-2 behaviour), for comparison.
     """
 
     def __init__(self, use_retrieval: bool = True, top_k: int = TOP_K_TABLES):
@@ -48,7 +48,7 @@ class TextToSQLPipeline:
     def reload(self) -> None:
         """
         Reads every .sqlite file, its descriptions and summaries, and re-embeds what changed.
-        Called at startup, and after a summary is saved or a database is added (step 6).
+        Called at startup, and after a summary is saved or a database is added (Version-6).
         The new state is built first and swapped in at once, so a question already running
         keeps using the old one.
         """

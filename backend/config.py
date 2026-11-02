@@ -19,14 +19,14 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 # Groq models (see what your key can use: https://console.groq.com/docs/models)
 GROQ_MODEL_RAG = "openai/gpt-oss-20b"
 GROQ_MODEL_SQL = "openai/gpt-oss-120b"
-GROQ_MODEL_SUMMARY = "openai/gpt-oss-120b"  # offline table summaries (Text-to-SQL step 3)
+GROQ_MODEL_SUMMARY = "openai/gpt-oss-120b"  # offline table summaries (Text-to-SQL Version-3)
 
-# Text-to-SQL step 4: SQL is generated in rounds of 3 calls and compared; never more than this per question
+# Text-to-SQL Version-4: SQL is generated in rounds of 3 calls and compared; never more than this per question
 SQL_CALLS_PER_ROUND = 3
 MAX_LLM_CALLS_PER_QUESTION = 6
 SQL_TEMPERATURE = 0.7  # some variety, so agreeing answers actually mean something
 
-# Text-to-SQL step 5: the user confirms what the question means first; at most this many sets of options
+# Text-to-SQL Version-5: the user confirms what the question means first; at most this many sets of options
 MAX_CLARIFY_ROUNDS = 3
 
 # Hugging Face: RAG evaluation scripts

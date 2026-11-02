@@ -50,13 +50,13 @@ class SQLiteDatabase:
                       1. database_description/ (BIRD format): every column annotated
                       2. schema.sql next to the .sqlite file: hand-written comments
                       3. plain CREATE TABLE statement from the database
-            doc       text embedded to find relevant tables (step 3): the LLM summary
+            doc       text embedded to find relevant tables (Version-3): the LLM summary
                       from table_summaries.json if it's up to date, else a column template
             links     names of the tables it references with foreign keys
             columns   [{"name", "type"}] in table order
             summary   the LLM summary (None if missing or out of date); reviewed: the user
-                      confirmed or corrected it (step 6); feedback: the user's corrections
-            row_count, profile   what each column really contains (step 4 checks)
+                      confirmed or corrected it (Version-6); feedback: the user's corrections
+            row_count, profile   what each column really contains (Version-4 checks)
 
         Built once, then reused.
         """

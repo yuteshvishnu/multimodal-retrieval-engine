@@ -18,7 +18,7 @@ MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
 @router.post("/interpret", response_model=InterpretResponse)
 def interpret_endpoint(query_text: str = Form(""), history: str = Form("[]")):
-    """Step 5: up to 3 meanings of the question. history = JSON list of rejected rounds."""
+    """Version-5: up to 3 meanings of the question. history = JSON list of rejected rounds."""
     return pipeline.interpret(query_text, json.loads(history))
 
 
@@ -27,7 +27,7 @@ def query_endpoint(query_text: str = Form(""), meaning: str = Form("")):
     return pipeline.run(query_text, meaning)
 
 
-# ---------- step 6: the Tables view ----------
+# ---------- Version-6: the Tables view ----------
 
 def _table(database: str, name: str) -> dict:
     table = pipeline.find_table(database, name)

@@ -2,7 +2,7 @@
 Scores the Text-to-SQL pipeline on a set of questions with known correct SQL.
 
 Two scores:
-- Schema recall (step 3): did the picked tables include every table the correct
+- Schema recall (Version-3): did the picked tables include every table the correct
   SQL uses? Needs no LLM call.
 - Execution accuracy (as in BIRD): the model's SQL and the correct ("gold") SQL are
   both run on the database and their result sets compared.
@@ -11,7 +11,7 @@ Run from the project root:
     python -m scripts.text_to_sql.evaluate                     # full run (calls the LLM)
     python -m scripts.text_to_sql.evaluate --retrieval-only    # table picking only, no LLM
     python -m scripts.text_to_sql.evaluate --k 3               # try a different top-k
-    python -m scripts.text_to_sql.evaluate --full-schema       # steps 1-2: send all tables
+    python -m scripts.text_to_sql.evaluate --full-schema       # versions 1-2: send all tables
     python -m scripts.text_to_sql.evaluate --ids 3,7,8         # only these questions
     python -m scripts.text_to_sql.evaluate --questions path/to/questions.json
 """

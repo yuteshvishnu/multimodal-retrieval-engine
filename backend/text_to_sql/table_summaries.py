@@ -1,5 +1,5 @@
 """
-Text-to-SQL step 3: LLM-written table summaries, used for embedding-based table search.
+Text-to-SQL Version-3: LLM-written table summaries, used for embedding-based table search.
 
 A template built from column names only says WHAT COLUMNS a table has. People ask in
 business words ("revenue", "spent", "sales"), so we ask an LLM, once and offline, to
@@ -18,7 +18,7 @@ Rules that keep summaries correct as the database changes:
 Build them all with the script:
     python -m scripts.text_to_sql.build_schema_index
 
-Step 6: the user reviews summaries in the Tables view. When one is wrong, they say why;
+Version-6: the user reviews summaries in the Tables view. When one is wrong, they say why;
 rewrite() makes a new one from their corrections (1 LLM call per try) until they save it.
 Their corrections are kept in table_summaries.json ("feedback") and reused whenever the
 summary is written again, so they survive schema changes and rebuilds.

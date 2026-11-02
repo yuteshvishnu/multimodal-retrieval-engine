@@ -1,5 +1,5 @@
 """
-Builds everything table search needs, ahead of time (Text-to-SQL step 3):
+Builds everything table search needs, ahead of time (Text-to-SQL Version-3):
 
 1. Summaries: asks the LLM to describe each new or changed table
    (saved to table_summaries.json next to the database; unchanged tables are skipped).
