@@ -1,0 +1,7 @@
+original_column_name,column_name,column_description,data_format,value_description
+shipment_id,shipment id,unique id of the shipment,integer,
+order_id,order id,id of the order being shipped,integer,references orders.order_id
+carrier,carrier,shipping company,text,"one of: 'UPS', 'FedEx', 'USPS', 'DHL'"
+shipped_date,shipped date,date the package left the store,date,format YYYY-MM-DD; NULL if not shipped yet
+delivered_date,delivered date,date the package reached the customer,date,format YYYY-MM-DD; NULL if not delivered yet
+status,shipment status,current status of the shipment,text,"'delivered', 'in_transit', 'pending' (not shipped yet) or 'cancelled'"

@@ -1,0 +1,7 @@
+original_column_name,column_name,column_description,data_format,value_description
+review_id,review id,unique id of the review,integer,
+product_id,product id,id of the product being reviewed,integer,references products.product_id
+customer_id,customer id,id of the customer who wrote the review,integer,references customers.customer_id
+rating,rating,star rating given by the customer,integer,1 to 5; 5 is best
+review_text,review text,written review,text,
+review_date,review date,date the review was posted,date,format YYYY-MM-DD

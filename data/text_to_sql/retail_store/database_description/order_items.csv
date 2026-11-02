@@ -1,0 +1,6 @@
+original_column_name,column_name,column_description,data_format,value_description
+order_item_id,order item id,unique id of the line item,integer,
+order_id,order id,id of the order this line item belongs to,integer,references orders.order_id; an order can have more than one item
+product_id,product id,id of the product purchased,integer,references products.product_id
+quantity,quantity,number of units purchased,integer,
+unit_price_cents,unit price in cents,price paid per unit at the time of the order,integer,in CENTS; revenue of a line item = quantity * unit_price_cents / 100 dollars

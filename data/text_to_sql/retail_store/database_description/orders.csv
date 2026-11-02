@@ -1,0 +1,7 @@
+original_column_name,column_name,column_description,data_format,value_description
+order_id,order id,unique id of the order,integer,
+customer_id,customer id,id of the customer who placed the order,integer,references customers.customer_id
+store_id,store id,id of the store where the order was placed,integer,references stores.store_id
+employee_id,employee id,id of the employee who handled the order,integer,references employees.employee_id
+order_date,order date,date the order was placed,text,"stored as TEXT in MM/DD/YYYY format, e.g. '03/04/2026' means March 4, 2026; not ISO, so convert before comparing dates"
+status,status,current status of the order,text,"'delivered' = received by customer; 'shipped' = on the way; 'processing' = not yet shipped; 'cancelled' = cancelled, has no order items and is excluded from revenue"

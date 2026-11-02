@@ -1,0 +1,6 @@
+original_column_name,column_name,column_description,data_format,value_description
+product_id,product id,unique id of the product,integer,
+product_name,product name,name of the product,text,
+category,category,product category,text,"one of: 'Electronics', 'Home & Kitchen', 'Clothing', 'Sports & Outdoors', 'Books'"
+supplier_id,supplier id,id of the supplier that provides this product,integer,references suppliers.supplier_id
+unit_price_cents,unit price in cents,current list price of one unit,integer,"price in CENTS, not dollars; divide by 100 for dollars (39999 = $399.99)"

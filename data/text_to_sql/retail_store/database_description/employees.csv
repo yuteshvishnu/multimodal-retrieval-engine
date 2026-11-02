@@ -1,0 +1,9 @@
+original_column_name,column_name,column_description,data_format,value_description
+employee_id,employee id,unique id of the employee,integer,
+first_name,first name,employee's first name,text,
+last_name,last name,employee's last name,text,
+title,job title,employee's job title,text,"one of: 'Store Manager', 'Sales Associate', 'Senior Sales Associate', 'Cashier', 'Inventory Specialist'"
+store_id,store id,id of the store where the employee works,integer,references stores.store_id
+manager_id,manager id,employee id of this employee's manager,integer,"references employees.employee_id; NULL for store managers, who have no manager"
+hire_date,hire date,date the employee was hired,date,format YYYY-MM-DD
+salary,salary,employee's yearly salary,integer,in US dollars per year

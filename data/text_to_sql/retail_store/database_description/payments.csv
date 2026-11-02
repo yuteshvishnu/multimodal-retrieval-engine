@@ -1,0 +1,6 @@
+original_column_name,column_name,column_description,data_format,value_description
+payment_id,payment id,unique id of the payment,integer,
+order_id,order id,id of the order this payment is for,integer,references orders.order_id
+method,payment method,how the customer paid,text,"one of: 'credit_card', 'debit_card', 'paypal', 'gift_card'"
+amount_cents,amount in cents,amount charged,integer,in CENTS; divide by 100 for dollars
+status,payment status,status of the payment,text,'completed' = money kept; 'refunded' = returned to the customer (cancelled orders)

@@ -1,0 +1,8 @@
+original_column_name,column_name,column_description,data_format,value_description
+customer_id,customer id,unique id of the customer,integer,
+first_name,first name,customer's first name,text,
+last_name,last name,customer's last name,text,
+email,email,customer's email address,text,
+city,city,"city where the customer lives, as typed by the customer",text,"free text with inconsistent spellings; New York City appears as 'New York', 'NY', 'NYC' and 'new york'"
+state,state,US state where the customer lives,text,two-letter state code
+signup_date,signup date,date the customer created an account,date,format YYYY-MM-DD

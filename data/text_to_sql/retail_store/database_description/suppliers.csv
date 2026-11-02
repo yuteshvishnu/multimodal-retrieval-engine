@@ -1,0 +1,5 @@
+original_column_name,column_name,column_description,data_format,value_description
+supplier_id,supplier id,unique id of the supplier,integer,
+supplier_name,supplier name,company name of the supplier,text,
+country,country,country where the supplier is based,text,"e.g. 'USA', 'China', 'Germany'"
+contact_email,contact email,supplier's sales contact email,text,

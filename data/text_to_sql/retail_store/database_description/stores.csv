@@ -1,0 +1,6 @@
+original_column_name,column_name,column_description,data_format,value_description
+store_id,store id,unique id of the store,integer,
+store_name,store name,"name of the store, usually the city plus a location label",text,"e.g. 'Madison Main', 'Chicago Plaza'"
+city,city,city where the store is located,text,"full city name, consistently spelled"
+state,state,US state where the store is located,text,"two-letter state code, e.g. 'WI', 'NY'"
+opened_date,opened date,date the store opened,date,format YYYY-MM-DD

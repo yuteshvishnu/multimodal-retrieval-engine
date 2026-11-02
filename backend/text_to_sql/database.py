@@ -3,6 +3,8 @@ import threading
 from pathlib import Path
 from typing import Any, List, Tuple
 
+from backend.text_to_sql.descriptions import annotated_schema, load_descriptions
+
 
 class SQLiteDatabase:
     """
@@ -34,14 +36,26 @@ class SQLiteDatabase:
 
     def schema(self) -> str:
         """
-        CREATE TABLE statements for every table in every attached file.
+        Schema for every table in every attached file, from the best source available:
 
-        If a schema.sql sits next to a .sqlite file, it is used instead, since its
-        comments (units, date formats, allowed values) help the LLM write correct SQL.
+        1. database_description/ next to the .sqlite file (BIRD format): every column
+           annotated with its meaning, format and allowed values
+        2. schema.sql next to the .sqlite file: hand-written comments
+        3. plain CREATE TABLE statements from the database
         """
         statements = []
         for path, alias in zip(self.files, self.aliases):
+            desc_dir = path.parent / "database_description"
             schema_file = path.parent / "schema.sql"
+
+            if desc_dir.is_dir():
+                text, warnings = annotated_schema(self.conn, alias, load_descriptions(desc_dir))
+                for warning in warnings:
+                    print(f"[Descriptions] WARNING {alias}: {warning}")
+                print(f"[Descriptions] Loaded descriptions for {alias}")
+                statements.append(text)
+                continue
+
             if schema_file.exists():
                 statements.append(schema_file.read_text(encoding="utf-8").strip())
                 continue

@@ -43,13 +43,14 @@ multimodal-retrieval-engine/
 │       ├── api.py           #   /api/sql/query
 │       ├── pipeline.py      #   question → SQL → result
 │       ├── sql_generator.py #   LLM writes the SQL
-│       └── database.py      #   loads .sqlite files, runs SQL read-only
+│       ├── database.py      #   loads .sqlite files, runs SQL read-only
+│       └── descriptions.py  #   reads database descriptions, adds them to the schema
 ├── frontend/                # React app (Vite) with two tabs
 │   └── src/tabs/            #   RagTab.jsx, SqlTab.jsx
 ├── data/
 │   ├── rag/                 # Version-1: raw docs, built index, eval set
 │   └── text_to_sql/         # Version-2: one folder per database
-│       └── retail_store/    #   practice DB, schema.sql, 20 questions + answers
+│       └── retail_store/    #   practice DB, descriptions, 20 questions + answers
 ├── scripts/
 │   ├── rag/                 # build the index, retrieval eval, RAGAS metrics
 │   └── text_to_sql/         # evaluate.py: execution accuracy on question sets
@@ -285,7 +286,7 @@ flowchart TD
     D --> E["React UI<br/>shows SQL + result table"]
 ```
 
-1. **Startup (once):** every `.sqlite` file under `data/text_to_sql/` is attached **read-only**, and its schema is loaded. If a `schema.sql` sits next to the database, it is used instead, because its comments (units, date formats, allowed values) help the LLM.
+1. **Startup (once):** every `.sqlite` file under `data/text_to_sql/` is attached **read-only**, and its schema is loaded from the best source available: the **database descriptions** (see Version-2.2), else a `schema.sql`, else the plain table definitions.
 2. **Question:** the user types a question in the Text-to-SQL tab.
 3. **SQL generation:** the LLM gets the schema + the question and writes **one `SELECT` query**.
 4. **Execution:** the query runs on the database (only `SELECT`/`WITH` allowed, at most 500 rows).
@@ -300,6 +301,38 @@ The simplest system that works end to end, to get a starting score:
 - **Prompt:** the full schema + the question; no examples, no sample values.
 - **Safety:** databases are opened read-only, and only `SELECT` queries are allowed.
 
+### Version-2.2: Database Descriptions
+
+**The problem.** The same data can be read in more than one way, and the table definitions alone don't say which is right:
+
+- Is `03/04/2026` March 4th or April 3rd?
+- Is `39999` a price of $39,999 or $399.99 (cents)?
+- Are `New York`, `NY` and `NYC` the same city?
+- Do cancelled orders count as revenue?
+
+Only the people who own the data know the answers, so the answers have to be **written down once** and given to the model with every question.
+
+**Why BIRD does the same.** BIRD faces exactly this problem, so every BIRD database comes with a `database_description/` folder: one CSV per table that explains each column. Systems are expected to read it. We use the **same format**, so the same code will work on our practice database and on BIRD.
+
+**The format** (one CSV per table, e.g. `orders.csv`):
+
+| original_column_name | column_description | data_format | value_description |
+|---|---|---|---|
+| `order_date` | date the order was placed | text | stored as MM/DD/YYYY, e.g. '03/04/2026' means March 4, 2026 |
+| `status` | current status of the order | text | 'cancelled' = … excluded from revenue |
+
+**What we built:**
+
+1. **Attach meanings to columns.** At startup, each description is placed right next to its column in the schema the model sees:
+   ```sql
+   order_date TEXT,  -- date the order was placed; stored as TEXT in MM/DD/YYYY format, e.g. '03/04/2026' means March 4, 2026
+   ```
+   The meaning sits exactly where the model is about to use the column.
+2. **Check the descriptions against the data** (read-only) and print a warning if they disagree: a value missing from a "one of: …" list, a date not in the stated format, a described column that doesn't exist, or a table with no description.
+3. **Fall back gracefully:** no descriptions → `schema.sql` → plain table definitions.
+
+**What descriptions don't solve:** they explain the **data**, not the **question**. If a user types "Q2" or "NYC", the model still has to interpret it, and question-specific choices (does "top customers" mean 5 or 10?) need a per-question hint, which BIRD calls **evidence**.
+
 ### Practice Database: `retail_store`
 
 Before BIRD, the system is tested on a small practice database in `data/text_to_sql/retail_store/`:
@@ -307,7 +340,8 @@ Before BIRD, the system is tested on a small practice database in `data/text_to_
 | File | What it is |
 |---|---|
 | `retail_store.sqlite` | 10 tables (stores, employees, customers, orders, payments, …), 50 rows each |
-| `schema.sql` | `CREATE TABLE` statements with comments on units and formats |
+| `database_description/` | One CSV per table (BIRD format): what each column means, its format and values |
+| `schema.sql` | `CREATE TABLE` statements with comments (used only if there are no descriptions) |
 | `questions.json` / `.md` | 20 questions (6 easy, 8 medium, 6 hard) with the correct SQL and answers |
 
 Traps built into the data:
@@ -329,7 +363,9 @@ For each question, the model's SQL and the correct SQL both run on the database 
 
 | Limitation | Effect | Possible fix |
 |---|---|---|
-| No sample values in the prompt | Misses messy values like `NY` / `NYC` | Add a few distinct values per column |
+| Question phrasing isn't normalized | "Q2", "last spring", "NYC" in a question are left to the model | Rewrite dates and known short forms before the LLM sees them |
+| No per-question hints | "Top customers": 5 or 10? | Add an `evidence` field per question, like BIRD |
+| No sample values in the prompt | Messy values are only known if someone described them | Add a few distinct values per column |
 | One attempt only | A failing query is not corrected | Retry with the error message |
 | "List all tables" returns nothing | Tables live in attached databases, not `main` | Expose a table-list view to the model |
 | Only data questions | "What do these tables mean?" can't be answered with SQL | Let the model answer in words from the schema |
