@@ -23,18 +23,17 @@ class LLMReasoner:
         self,
         query_text: str,
         retrieved_chunks: List[Dict],
-        image_info: str | None = None,
     ) -> Tuple[str, str]:
         if not retrieved_chunks:
             return ("I couldn't find any relevant documents.", "No chunks available.")
 
         try:
-            return self._answer_with_cloud(query_text, retrieved_chunks, image_info)
+            return self._answer_with_cloud(query_text, retrieved_chunks)
         except Exception as e:
             print(f"[LLMReasoner] Cloud failed: {e}. Falling back to rules.")
-            return self._answer_with_bullets(query_text, retrieved_chunks, image_info)
+            return self._answer_with_bullets(query_text, retrieved_chunks)
 
-    def _answer_with_cloud(self, query, chunks, img) -> Tuple[str, str]:
+    def _answer_with_cloud(self, query, chunks) -> Tuple[str, str]:
         context = "\n".join([f"[{c['id']}] {c['snippet']}" for c in chunks[:5]])
         
         completion = self.client.chat.completions.create(
@@ -47,6 +46,6 @@ class LLMReasoner:
         )
         return completion.choices[0].message.content, f"Groq {self.model_name}"
 
-    def _answer_with_bullets(self, query, chunks, img) -> Tuple[str, str]:
+    def _answer_with_bullets(self, query, chunks) -> Tuple[str, str]:
         bullets = "\n".join([f"• {c['snippet'][:200]}..." for c in chunks[:3]])
         return f"Summary for '{query}':\n\n{bullets}", "Rule-based fallback."

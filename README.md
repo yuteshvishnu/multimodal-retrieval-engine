@@ -1,4 +1,4 @@
-# Version-1: Multimodal Retrieval and Reasoning Engine
+# Version-1: Retrieval and Reasoning Engine
 
 # Version-1.1 : Basic Text Semantic Search + Bullet Summary
 we build a basic architecture
@@ -99,31 +99,6 @@ Till now we have this single point of data dump, where we have all sources from 
 
 # Version-1.9 : Polished UX: Rich Text UI + Citation Viewer
 Providing a better UI experience with better layout
-
-# Version-1.10 : Multimodal Extension (Text + Image Retrieval)
-Now that we completed the flow for the text, we shall do for the image, 
-
-It does not change the value, only the type and how it is stored.
-
-Raw Image Bytes
-        |
-        v
-   SHA-256 Hash (32 bytes)
-        |
-        v
- Convert to float32 array (length=32)
-        |
-        v
-   Repeat until length=768
-        |
-        v
-   Normalize (unit vector)
-        |
-        v
-  Final Embedding (768-dim)
-
-
-  This concludes the basic skeleton implementation of a working multi-modal RAG based approach for Text + Image inputs
 
 # Summary of Version-1
 

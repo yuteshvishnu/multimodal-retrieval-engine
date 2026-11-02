@@ -1,11 +1,11 @@
-from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi import FastAPI, Request, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from backend.api.schemas import QueryResponse
 
-from backend.core.pipeline import MultimodalPipeline  # 👈 NEW
+from backend.core.pipeline import RAGPipeline
 from backend.feedback.logger import log_feedback
 
 app = FastAPI()
@@ -22,7 +22,7 @@ class FeedbackPayload(BaseModel):
 templates = Jinja2Templates(directory="frontend/templates")
 
 # single pipeline instance for the whole app
-pipeline = MultimodalPipeline()  # 👈 NEW
+pipeline = RAGPipeline()
 
 
 @app.get("/health")
@@ -38,14 +38,9 @@ def serve_home(request: Request):
 @app.post("/query", response_model=QueryResponse)
 async def query_endpoint(
     query_text: str | None = Form(None),
-    image: UploadFile | None = File(None),
-    audio: UploadFile | None = File(None),
     sources: str | None = Form(None),
     collections: str | None = Form(None),
 ):
-    image_bytes = await image.read() if image is not None else None
-    audio_bytes = await audio.read() if audio is not None else None
-
     source_list: list[str] | None = None
     if sources:
         source_list = [s.strip() for s in sources.split(",") if s.strip()]
@@ -56,8 +51,6 @@ async def query_endpoint(
 
     result = pipeline.run(
         query_text=query_text,
-        image_bytes=image_bytes,
-        audio_bytes=audio_bytes,
         sources=source_list,
         collections=collection_list,
     )

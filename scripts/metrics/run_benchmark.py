@@ -1,6 +1,6 @@
 import os
 import json
-from backend.core.pipeline import MultimodalPipeline
+from backend.core.pipeline import RAGPipeline
 
 # 1. Setup paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -15,7 +15,7 @@ TEST_QUESTIONS = [
 ]
 
 def run_and_save():
-    pipeline = MultimodalPipeline()
+    pipeline = RAGPipeline()
     captured_data = []
 
     print("--- Phase 1: Running RAG Pipeline ---")

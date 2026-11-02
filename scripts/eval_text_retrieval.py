@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import List, Dict
 
-from backend.core.pipeline import MultimodalPipeline
+from backend.core.pipeline import RAGPipeline
 
 
 EVAL_FILE = Path("data/eval/text_eval.json")
@@ -22,7 +22,7 @@ def main():
     cases = load_eval_cases()
     print(f"[Eval] Loaded {len(cases)} cases")
 
-    pipeline = MultimodalPipeline()
+    pipeline = RAGPipeline()
 
     total = len(cases)
     source_hits = 0
@@ -38,10 +38,9 @@ def main():
         print(f"  Expected source: {expected_source!r}")
         print(f"  Expected snippet contains: {expected_name_contains!r}")
 
-        # Run pipeline (text-only; no image, no source filter)
+        # Run pipeline (no source filter)
         result = pipeline.run(
             query_text=query,
-            image_bytes=None,
             sources=None,
         )
 

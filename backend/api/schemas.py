@@ -13,4 +13,3 @@ class QueryResponse(BaseModel):
     answer: str
     citations: List[RetrievedChunk]
     reasoning_summary: Optional[str] = None
-    used_image: bool = False

@@ -1,24 +1,18 @@
-from typing import Optional
-import numpy as np
-import torch
-
 from backend.encoders.text_encoder import TextEncoder
-from backend.encoders.image_encoder import ImageEncoder
 from backend.retrieval.index import VectorIndex
 from backend.retrieval.reranker import ReRanker
 from backend.reasoning.llm_reasoner import LLMReasoner
 
 
-class MultimodalPipeline:
+class RAGPipeline:
     """
-    Orchestrates the multimodal retrieval + reasoning.
+    Orchestrates text retrieval + reasoning.
     Updated to handle Cloud-Hybrid LLM reasoning without crashing.
     """
 
     def __init__(self):
-        # encoders
+        # encoder
         self.text_encoder = TextEncoder()
-        self.image_encoder = ImageEncoder()
 
         # retrieval index (stage 1)
         self.index = VectorIndex()
@@ -32,72 +26,51 @@ class MultimodalPipeline:
     def run(
         self,
         query_text: str | None,
-        image_bytes: Optional[bytes] = None,
-        audio_bytes: Optional[bytes] = None,
         sources: list[str] | None = None,
         collections: list[str] | None = None,
     ) -> dict:
         """
         Main entry point:
-        - Encode signals
+        - Encode query
         - Stage 1 Search
         - Stage 2 Rerank
         - Cloud/Local Reasoning
         """
 
-        # 1) encode query text
-        text_embedding = None
-        if query_text is not None and query_text.strip():
-            text_embedding = self.text_encoder.encode(query_text)
-
-        # 2) encode query image
-        image_embedding = None
-        image_info = None
-        if image_bytes is not None:
-            image_embedding = self.image_encoder.encode(image_bytes)
-            image_info = "Image provided with the query"
-
-        # 3) validate input
-        if text_embedding is None and image_embedding is None:
+        # 1) validate input
+        if query_text is None or not query_text.strip():
             return {
-                "answer": "Please provide a question or an image.",
+                "answer": "Please provide a question.",
                 "citations": [],
-                "reasoning_summary": "No query text or image provided.",
+                "reasoning_summary": "No query text provided.",
             }
 
-        # 4) build query vector
-        query_vecs = []
-        if text_embedding is not None:
-            query_vecs.append(text_embedding)
-        if image_embedding is not None:
-            query_vecs.append(image_embedding)
+        # 2) encode query text
+        query_vec = self.text_encoder.encode(query_text)
 
-        combined_query_vec = np.mean(query_vecs, axis=0)
-
-        # 5) Stage 1: vector search
+        # 3) Stage 1: vector search
         stage1_top_k = 20
         stage1_candidates = self.index.search(
-            combined_query_vec,
+            query_vec,
             top_k=stage1_top_k,
             source_filter=sources,
             collection_filter=collections,
         )
         print(f"[Pipeline] Stage 1 retrieved {len(stage1_candidates)} candidates")
 
-        # 6) Stage 2: rerank
+        # 4) Stage 2: rerank
         final_top_k = 5
         retrieved = self.reranker.rerank(
-            query_text=query_text or "",
+            query_text=query_text,
             candidates=stage1_candidates,
             final_top_k=final_top_k,
         )
         print(f"[Pipeline] Stage 2 re-ranked to {len(retrieved)} final chunks")
 
-        # 7) reasoning
+        # 5) reasoning
         answer, reasoning_summary = self.reasoner.answer(
-            query_text=query_text or "",
+            query_text=query_text,
             retrieved_chunks=retrieved,
-            image_info=image_info,
         )
 
         # --- UPDATED DEVICE LOGGING ---
