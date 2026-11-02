@@ -26,7 +26,7 @@ class TextEncoder:
 @lru_cache(maxsize=None)
 def get_text_encoder() -> TextEncoder:
     """
-    One shared encoder for the whole app, so RAG (Version-1) and table search
-    (Version-3) don't each load the same model into memory.
+    One shared encoder for the whole app, so RAG and Text-to-SQL table
+    search don't each load the same model into memory.
     """
     return TextEncoder()

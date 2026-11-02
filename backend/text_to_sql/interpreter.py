@@ -1,5 +1,5 @@
 """
-Version-5: understand the question before writing any SQL.
+Text-to-SQL step 5: understand the question before writing any SQL.
 
 The model lists up to 3 things the question could mean, each with the choices that make it
 different ("Cancelled orders: counted"). The user picks one, or says "none of these" and

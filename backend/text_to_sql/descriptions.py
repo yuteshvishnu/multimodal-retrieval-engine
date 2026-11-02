@@ -115,7 +115,7 @@ def annotated_schema(
 
 def table_document(table: str, columns: List[str], table_desc: Dict[str, dict] | None) -> str:
     """
-    One short line describing a table, used for embedding-based table search (Version-3).
+    One short line describing a table, used for embedding-based table search (step 3).
     Built from the table name, its column names and their descriptions, e.g.
 
         Table orders: order id (unique id of the order), order date (date the order was placed), ...

@@ -6,7 +6,7 @@ from backend.rag.schemas import QueryResponse
 from backend.rag.pipeline import RAGPipeline
 from backend.rag.feedback.logger import log_feedback
 
-router = APIRouter(prefix="/api/rag", tags=["Version-1: RAG"])
+router = APIRouter(prefix="/api/rag", tags=["RAG"])
 
 class FeedbackPayload(BaseModel):
     query_text: str

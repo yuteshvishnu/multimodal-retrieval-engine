@@ -8,12 +8,12 @@ class QueryResponse(BaseModel):
     columns: List[str] = []
     rows: List[List[Any]] = []
     error: Optional[str] = None
-    confidence: Optional[str] = None  # high / medium / low (Version-4)
+    confidence: Optional[str] = None  # high / medium / low (step 4)
     warnings: List[str] = []          # results of the deterministic checks
     llm_calls: int = 0
     attempts: List[dict] = []         # every SQL the model wrote, and what happened to it
     feedback: Optional[str] = None    # what the model was told when its attempts disagreed
-    meaning: Optional[str] = None     # the meaning the user confirmed (Version-5)
+    meaning: Optional[str] = None     # the meaning the user confirmed (step 5)
 
 
 class InterpretResponse(BaseModel):

@@ -1,3 +1,4 @@
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import List, Optional
@@ -19,13 +20,13 @@ TOP_K_TABLES = 4
 
 class TextToSQLPipeline:
     """
-    Question -> pick relevant tables (embeddings) -> confirm the meaning with the user (Version-5)
+    Question -> pick relevant tables (embeddings) -> confirm the meaning with the user (step 5)
     -> SQL (LLM, in rounds) -> checks -> result table.
 
     interpret(): up to 3 meanings for the user to pick from (1 LLM call per set of options).
     run(meaning=...): writes SQL that follows the meaning the user picked.
 
-    SQL rounds (Version-4), with a hard stop of MAX_LLM_CALLS_PER_QUESTION calls
+    SQL rounds (step 4), with a hard stop of MAX_LLM_CALLS_PER_QUESTION calls
     (SQL_CALLS_PER_ROUND calls per round, both set in backend/config.py):
       round 1: each SQL is checked, then run. At least two with the same result -> done
                (high confidence if all agree, medium if only some do).
@@ -33,18 +34,32 @@ class TextToSQLPipeline:
                involved. Any two answers agree -> done (medium). Otherwise -> the latest
                valid answer (low confidence). Stop.
 
-    use_retrieval=False sends the full schema instead (Version-2 behaviour), for comparison.
+    use_retrieval=False sends the full schema instead (steps 1-2 behaviour), for comparison.
     """
 
     def __init__(self, use_retrieval: bool = True, top_k: int = TOP_K_TABLES):
-        self.database = SQLiteDatabase()
         self.generator = SQLGenerator()
         self.interpreter = QuestionInterpreter()
         self.top_k = top_k
+        self.use_retrieval = use_retrieval
+        self._reload_lock = threading.Lock()
+        self.reload()
 
-        # tables are read once at startup; restart the server after adding .sqlite files
-        self.tables = self.database.tables
-        self.index = SchemaIndex(self.tables) if use_retrieval and self.tables else None
+    def reload(self) -> None:
+        """
+        Reads every .sqlite file, its descriptions and summaries, and re-embeds what changed.
+        Called at startup, and after a summary is saved or a database is added (step 6).
+        The new state is built first and swapped in at once, so a question already running
+        keeps using the old one.
+        """
+        with self._reload_lock:
+            database = SQLiteDatabase()
+            tables = database.tables
+            index = SchemaIndex(tables) if self.use_retrieval and tables else None
+            self.database, self.tables, self.index = database, tables, index
+
+    def find_table(self, database: str, name: str) -> Optional[dict]:
+        return next((t for t in self.tables if t["database"] == database and t["name"] == name), None)
 
     def select_tables(self, query_text: str) -> List[dict]:
         if self.index is None:

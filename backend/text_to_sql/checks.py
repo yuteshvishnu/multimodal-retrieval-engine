@@ -1,5 +1,5 @@
 """
-Version-4: deterministic checks around the LLM's SQL. No LLM calls, no guessing:
+Text-to-SQL step 4: deterministic checks around the LLM's SQL. No LLM calls, no guessing:
 each check is a plain rule over the question, the SQL, or the result.
 
     profile_table   once at startup: what each column really contains

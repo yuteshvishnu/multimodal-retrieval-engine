@@ -1,5 +1,5 @@
 """
-Version-3.2: LLM-written table summaries, used for embedding-based table search.
+Text-to-SQL step 3: LLM-written table summaries, used for embedding-based table search.
 
 A template built from column names only says WHAT COLUMNS a table has. People ask in
 business words ("revenue", "spent", "sales"), so we ask an LLM, once and offline, to
@@ -15,14 +15,19 @@ Rules that keep summaries correct as the database changes:
   only new or changed tables are summarized again, deleted tables are dropped,
   and the file can be read and edited by hand.
 
-The server never calls the LLM for summaries; run the build script:
+Build them all with the script:
     python -m scripts.text_to_sql.build_schema_index
+
+Step 6: the user reviews summaries in the Tables view. When one is wrong, they say why;
+rewrite() makes a new one from their corrections (1 LLM call per try) until they save it.
+Their corrections are kept in table_summaries.json ("feedback") and reused whenever the
+summary is written again, so they survive schema changes and rebuilds.
 """
 import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
@@ -77,6 +82,19 @@ def fresh_summary(table: dict, saved: Dict[str, dict]) -> Optional[str]:
     return None
 
 
+def save_summary(table: dict, summary: str, feedback: List[str]) -> None:
+    """Saves a summary the user confirmed, with every correction they gave for it."""
+    saved = load_summaries(table["folder"])
+    saved[table["name"]] = {
+        "summary": summary,
+        "fingerprint": fingerprint(table),
+        "reviewed": True,
+        "feedback": feedback,
+    }
+    path = Path(table["folder"]) / SUMMARY_FILE
+    path.write_text(json.dumps(saved, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def problems_in(summary: str, table: dict, all_names: List[str]) -> List[str]:
     """
     Ways a summary breaks the "only this table" rule. Plain words like "customers" are
@@ -104,25 +122,28 @@ class TableSummarizer:
         self.database = database
         self.client = OpenAI(base_url=GROQ_BASE_URL, api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
-    def build(self, rebuild: bool = False) -> None:
-        """Summarizes new or changed tables in every database and saves them."""
+    def build(self, rebuild: bool = False, folders: Optional[List[Path]] = None) -> None:
+        """Summarizes new or changed tables in every database (or only in `folders`) and saves them."""
         tables = self.database.tables
         all_names = [t["name"] for t in tables]
 
-        folders = {}
+        by_folder = {}
         for table in tables:
-            folders.setdefault(table["folder"], []).append(table)
+            if folders is None or Path(table["folder"]) in {Path(f) for f in folders}:
+                by_folder.setdefault(table["folder"], []).append(table)
 
-        for folder, group in folders.items():
+        for folder, group in by_folder.items():
             saved = load_summaries(folder)
             updated = {}
             for table in group:
+                entry = saved.get(table["name"], {})
                 summary = None if rebuild else fresh_summary(table, saved)
                 if summary is None:
-                    summary = self._summarize(table, all_names)
+                    summary = self._summarize(table, all_names, entry.get("feedback", []))
                     if summary is None:
                         continue  # left out; the template is used for this table
-                updated[table["name"]] = {"summary": summary, "fingerprint": fingerprint(table)}
+                    entry = {k: v for k, v in entry.items() if k != "reviewed"}  # new text: not reviewed yet
+                updated[table["name"]] = {**entry, "summary": summary, "fingerprint": fingerprint(table)}
 
             dropped = sorted(set(saved) - {t["name"] for t in group})
             for name in dropped:
@@ -132,13 +153,29 @@ class TableSummarizer:
             path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             print(f"[Summaries] Saved {len(updated)}/{len(group)} summaries to {path}")
 
-    def _summarize(self, table: dict, all_names: List[str]) -> Optional[str]:
+    def rewrite(self, table: dict, all_names: List[str], current: str, feedback: List[str]) -> Tuple[str, List[str]]:
+        """
+        A new summary that follows the user's corrections. One LLM call, no retries:
+        returns (summary, problems), and the user decides whether to keep it.
+        """
+        if self.client is None:
+            raise RuntimeError("GROQ_API_KEY is not set.")
+        prompt = self._table_prompt(table, feedback) + f"\n\nCurrent description (the user says it is wrong):\n{current}"
+        completion = self.client.chat.completions.create(
+            model=GROQ_MODEL_SUMMARY,
+            messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+        summary = " ".join((completion.choices[0].message.content or "").split())
+        return summary, problems_in(summary, table, all_names)
+
+    def _summarize(self, table: dict, all_names: List[str], feedback: List[str] = ()) -> Optional[str]:
         if self.client is None:
             raise RuntimeError("GROQ_API_KEY is not set.")
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": self._table_prompt(table)},
+            {"role": "user", "content": self._table_prompt(table, feedback)},
         ]
         for attempt in range(1, MAX_ATTEMPTS + 1):
             completion = self.client.chat.completions.create(
@@ -164,12 +201,19 @@ class TableSummarizer:
         print(f"[Summaries] WARNING: no valid summary for '{table['name']}'; using the column template")
         return None
 
-    def _table_prompt(self, table: dict) -> str:
-        return (
+    def _table_prompt(self, table: dict, feedback: List[str] = ()) -> str:
+        prompt = (
             f"Table name: {table['name']}\n\n"
             f"Schema, with a description of each column:\n{table['schema']}\n\n"
             f"Sample rows:\n{self._sample_rows(table)}"
         )
+        if feedback:
+            prompt += (
+                "\n\nCorrections from the person who owns this data (oldest first). They are facts: "
+                "follow every one, even over the sample rows or your own assumptions:\n"
+                + "\n".join(f"- {item}" for item in feedback)
+            )
+        return prompt
 
     def _sample_rows(self, table: dict) -> str:
         try:

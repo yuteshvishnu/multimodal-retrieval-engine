@@ -50,10 +50,13 @@ class SQLiteDatabase:
                       1. database_description/ (BIRD format): every column annotated
                       2. schema.sql next to the .sqlite file: hand-written comments
                       3. plain CREATE TABLE statement from the database
-            doc       text embedded to find relevant tables (Version-3): the LLM summary
+            doc       text embedded to find relevant tables (step 3): the LLM summary
                       from table_summaries.json if it's up to date, else a column template
             links     names of the tables it references with foreign keys
-            row_count, profile   what each column really contains (Version-4 checks)
+            columns   [{"name", "type"}] in table order
+            summary   the LLM summary (None if missing or out of date); reviewed: the user
+                      confirmed or corrected it (step 6); feedback: the user's corrections
+            row_count, profile   what each column really contains (step 4 checks)
 
         Built once, then reused.
         """
@@ -81,7 +84,8 @@ class SQLiteDatabase:
                 "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL ORDER BY rowid"
             ).fetchall()
             for name, plain_sql in rows:
-                columns = [col[1] for col in self.conn.execute(f'PRAGMA "{alias}".table_info("{name}")')]
+                info = self.conn.execute(f'PRAGMA "{alias}".table_info("{name}")').fetchall()
+                columns = [col[1] for col in info]
                 links = {fk[2] for fk in self.conn.execute(f'PRAGMA "{alias}".foreign_key_list("{name}")')}
                 table = {
                     "name": name,
@@ -89,10 +93,15 @@ class SQLiteDatabase:
                     "folder": path.parent,
                     "schema": statements.get(name, plain_sql),
                     "links": links - {name},
+                    "columns": [{"name": col[1], "type": col[2] or ""} for col in info],
                 }
                 table["row_count"], table["profile"] = profile_table(self.conn, alias, name)
 
                 summary = fresh_summary(table, summaries)
+                entry = summaries.get(name, {})
+                table["summary"] = summary
+                table["reviewed"] = bool(summary and entry.get("reviewed"))
+                table["feedback"] = entry.get("feedback", [])
                 if summary:
                     table["doc"] = f"Table {name.replace('_', ' ')}: {summary}"
                     summarized += 1
@@ -102,6 +111,15 @@ class SQLiteDatabase:
 
             print(f"[Summaries] {alias}: {summarized}/{len(rows)} tables have an up-to-date LLM summary")
         return tables
+
+    def preview(self, alias: str, table: str, page: int, page_size: int) -> Tuple[List[str], List[List[Any]]]:
+        """One page of a table's rows, for the Tables tab."""
+        offset = (page - 1) * page_size
+        return self.run(f'SELECT * FROM "{alias}"."{table}" LIMIT {int(page_size)} OFFSET {int(offset)}')
+
+    def close(self) -> None:
+        with self.lock:
+            self.conn.close()
 
     def schema(self) -> str:
         """
