@@ -79,6 +79,40 @@ button {
   font-size: 0.9rem;
 }
 
+.confidence {
+  font-weight: 600;
+}
+
+.confidence.high {
+  color: #15803d;
+}
+
+.confidence.medium {
+  color: #b45309;
+}
+
+.confidence.low {
+  color: #b91c1c;
+}
+
+.warnings {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem 0.5rem 1.75rem;
+  color: #78350f;
+}
+
+.attempts {
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.attempts summary {
+  cursor: pointer;
+}
+
 /* results */
 pre {
   background: #f5f5f5;
@@ -114,4 +148,51 @@ td {
 
 th {
   background: #f5f5f5;
+}
+
+/* Version-5: pick what the question means */
+.clarify {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.clarify .option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.clarify .option.picked {
+  border-color: #0969da;
+  background: #f0f6ff;
+}
+
+.clarify .option ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: #57606a;
+}
+
+.clarify textarea {
+  font: inherit;
+  padding: 8px;
+}
+
+.clarify button {
+  align-self: flex-start;
+}
+
+.muted {
+  color: #57606a;
+  font-weight: normal;
+}
+
+.meaning {
+  white-space: pre-line;
 }

@@ -5,6 +5,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from backend.text_to_sql.checks import profile_table
 from backend.text_to_sql.descriptions import annotated_schema, load_descriptions, table_document
 from backend.text_to_sql.table_summaries import fresh_summary, load_summaries
 
@@ -52,6 +53,7 @@ class SQLiteDatabase:
             doc       text embedded to find relevant tables (Version-3): the LLM summary
                       from table_summaries.json if it's up to date, else a column template
             links     names of the tables it references with foreign keys
+            row_count, profile   what each column really contains (Version-4 checks)
 
         Built once, then reused.
         """
@@ -88,6 +90,7 @@ class SQLiteDatabase:
                     "schema": statements.get(name, plain_sql),
                     "links": links - {name},
                 }
+                table["row_count"], table["profile"] = profile_table(self.conn, alias, name)
 
                 summary = fresh_summary(table, summaries)
                 if summary:
@@ -105,6 +108,16 @@ class SQLiteDatabase:
         The full schema: every table's CREATE TABLE statement.
         """
         return "\n\n".join(table["schema"] for table in self.tables)
+
+    def explain(self, sql: str) -> None:
+        """
+        Checks a query without running it (syntax, unknown tables or columns).
+        Raises sqlite3.Error if it is invalid.
+        """
+        if not sql.lstrip().lower().startswith(("select", "with")):
+            raise ValueError("Only SELECT queries are allowed.")
+        with self.lock:
+            self.conn.execute(f"EXPLAIN {sql}").fetchall()
 
     def run(self, sql: str) -> Tuple[List[str], List[List[Any]]]:
         """

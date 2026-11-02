@@ -12,6 +12,7 @@ Run from the project root:
     python -m scripts.text_to_sql.evaluate --retrieval-only    # table picking only, no LLM
     python -m scripts.text_to_sql.evaluate --k 3               # try a different top-k
     python -m scripts.text_to_sql.evaluate --full-schema       # Version-2: send all tables
+    python -m scripts.text_to_sql.evaluate --ids 3,7,8         # only these questions
     python -m scripts.text_to_sql.evaluate --questions path/to/questions.json
 """
 import argparse
@@ -41,13 +42,17 @@ def main():
     parser.add_argument("--k", type=int, default=TOP_K_TABLES, help="tables picked by embedding search")
     parser.add_argument("--full-schema", action="store_true", help="send every table (no table search)")
     parser.add_argument("--retrieval-only", action="store_true", help="only score table picking; no LLM calls")
+    parser.add_argument("--ids", help="comma-separated question ids to run, e.g. 3,7,8")
     args = parser.parse_args()
 
     questions = json.loads(args.questions.read_text(encoding="utf-8"))
+    if args.ids:
+        wanted = {int(i) for i in args.ids.split(",")}
+        questions = [q for q in questions if q["id"] in wanted]
     pipeline = TextToSQLPipeline(use_retrieval=not args.full_schema, top_k=args.k)
     all_names = [table["name"] for table in pipeline.tables]
 
-    recall_hits, tables_sent, correct = 0, 0, 0
+    recall_hits, tables_sent, correct, llm_calls = 0, 0, 0, 0
     by_difficulty = defaultdict(lambda: [0, 0])  # difficulty -> [correct, total]
 
     for q in questions:
@@ -73,8 +78,13 @@ def main():
         by_difficulty[q["difficulty"]][0] += ok
         by_difficulty[q["difficulty"]][1] += 1
 
+        llm_calls += result.get("llm_calls", 0)
+
         mark = "PASS" if ok else "FAIL"
         print(f"\n[{mark}] #{q['id']} ({q['difficulty']}) {q['question']}")
+        print(f"  Confidence: {result.get('confidence')}, LLM calls: {result.get('llm_calls', 0)}")
+        for warning in result.get("warnings", []):
+            print(f"  Warning:   {warning}")
         if not ok:
             if missing:
                 print(f"  Tables:    picked {picked}, missing {sorted(missing)}")
@@ -103,6 +113,7 @@ def main():
             c, t = by_difficulty[difficulty]
             print(f"{difficulty:<8}: {c}/{t}")
     print(f"{'overall':<8}: {correct}/{total} ({correct / total * 100:.1f}%)")
+    print(f"LLM calls: {llm_calls} total, {llm_calls / total:.1f} per question")
 
 
 if __name__ == "__main__":

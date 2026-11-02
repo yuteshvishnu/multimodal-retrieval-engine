@@ -8,6 +8,9 @@ python-dotenv
 # LLM (Groq, via the OpenAI-compatible API)
 openai
 
+# Version-4: reads SQL into its parts, to compare the model's attempts (free, no model)
+sqlglot
+
 # Version-1: RAG
 numpy
 torch

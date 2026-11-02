@@ -15,6 +15,8 @@ LLM-powered systems that answer questions **only from our own data**, built in v
 - [Version-1: RAG over Text Documents](#version-1-target)
 - [Version-2: LLM-Powered Text-to-SQL System](#version-2-llm-powered-text-to-sql-system)
 - [Version-3: Scaling to Large Databases](#version-3-scaling-to-large-databases)
+- [Version-4: Trustworthy SQL](#version-4-trustworthy-sql)
+- [Version-5: Confirm the Meaning First](#version-5-confirm-the-meaning-first)
 - [Models](#models)
 
 ## Goal
@@ -47,7 +49,9 @@ multimodal-retrieval-engine/
 │       ├── database.py      #   loads .sqlite files, runs SQL read-only
 │       ├── descriptions.py  #   reads database descriptions, adds them to the schema
 │       ├── schema_index.py  #   Version-3: finds relevant tables with embeddings
-│       └── table_summaries.py # Version-3: LLM-written table summaries (offline)
+│       ├── table_summaries.py # Version-3: LLM-written table summaries (offline)
+│       ├── checks.py        #   Version-4: deterministic checks before and after running SQL
+│       └── interpreter.py   #   Version-5: up to 3 meanings of the question for the user to pick
 ├── frontend/                # React app (Vite) with two tabs
 │   └── src/tabs/            #   RagTab.jsx, SqlTab.jsx
 ├── data/
@@ -116,6 +120,7 @@ Open **http://localhost:8000** and pick a tab: **RAG (Version-1)** or **Text-to-
 | Compare with sending every table | `python -m scripts.text_to_sql.evaluate --full-schema` |
 | Summarize new/changed tables (LLM), then embed | `python -m scripts.text_to_sql.build_schema_index` |
 | Re-embed only, no LLM calls | `python -m scripts.text_to_sql.build_schema_index --skip-summaries` |
+| Run only some questions | `python -m scripts.text_to_sql.evaluate --ids 3,7,8` |
 | API docs (auto-generated) | http://localhost:8000/docs |
 
 ---
@@ -428,6 +433,102 @@ LLM summaries vs column names: **same picks**, slightly better ranking (needed t
 
 ---
 
+## Version-4: Trustworthy SQL
+
+Versions 2–3 decided **what the model reads**. Version-4 focuses on **the SQL it writes**: in a real product there's no answer key, so a query that runs without error can still be wrong. We add every **deterministic** check we can (no LLM judging another LLM).
+
+### Open Questions
+
+**1. Data can be read in different ways (dates, units, short forms).** Handled by database descriptions (Version-2.2).
+
+**2. The data is from the past; how does the model know what "last week" means?** Every prompt now includes **today's date and time** and **the date range of the data** (e.g. `orders.order_date: 01/24/2026 to 10/29/2026`).
+
+**3. A query ran and returned a number. How do we know it's right without an answer key?** Cheap, deterministic checks before and after running it, and asking the model more than once.
+
+### How It Works
+
+| Step | What it does | LLM calls |
+|---|---|---|
+| **Question check** | Rejects impossible requests ("top -5") | 0 |
+| **Round 1** | 3 SQLs written. Each is checked, then run. All agree → **high**; two agree → **medium**. Done | 3 |
+| **Round 2** | 3 more, told exactly how round 1 differed. Any two agree → **medium**; else the latest → **low**. Stop | 3 |
+| **Hard stop** | A counter refuses any call beyond **6 per question** | — |
+
+Answers are compared by their **results**, not their SQL text, since different SQL can be equally correct.
+
+**Before running** (wrong for sure → rejected): invalid SQL or unknown column (SQLite `EXPLAIN`), `LIMIT` ≤ 0, cents divided by integer `100`, a value a column doesn't have (`status = 'complete'`), a date in the wrong format. Warnings: future dates, numbers outside a column's range (`rating = 7`).
+
+**After running** (warnings): empty result (with the data's date range), every row of a table with no filter, a count larger than the table, negative money, the same record returned twice, many rows for a "which one" question.
+
+**When attempts disagree**, round 2 isn't told a vague "think carefully". It's told exactly where the SQLs differ (filters, tables, joins, grouping, ranking, limit), what each one returned, and the data descriptions of those columns. No LLM call.
+
+The UI shows the confidence, the number of LLM calls, any warnings, and every attempt.
+
+### Results (3 questions, real LLM)
+
+| Question | Result | Confidence | LLM calls |
+|---|---|---|---|
+| #3 most expensive product in dollars (cents trap) | ✅ | high | 2 |
+| #7 customers in New York City (spelling trap) | ✅ | high | 2 |
+| #8 orders in March 2026 (MM/DD/YYYY trap) | ✅ | high | 2 |
+| #19 top revenue category ("not cancelled", not "delivered") | ✅ | high | 3 |
+| #20 employee with most orders per store (ties) | ❌ | medium | 6 |
+
+### Issue: comparing SQL by text matching breaks on real queries
+
+On #20, round 1 gave 3 different answers. The real differences were (a) counting cancelled orders or not, and (b) `RANK` (keeps ties) vs `ROW_NUMBER` (drops ties). But the diff searched the SQL text for words like `WHERE` and `GROUP BY`, which falls apart on multi-step queries (`WITH ... AS (...)`). It compared one step's filter with another step's `rn = 1`, listed step names as tables, and never mentioned the ranking. With the wrong hint, round 2 agreed on a wrong answer, so **agreement isn't proof of correctness**.
+
+**Fix: a SQL parser ([sqlglot](https://github.com/tobymao/sqlglot)).** A parser reads SQL the way a grammar checker reads a sentence: it splits the query into labeled parts (tables, filters, grouping, ranking) in every step, so attempts are compared part by part. It's a free Python library with no model inside, so it's still deterministic and adds no LLM calls. On the #20 queries the feedback now says exactly:
+
+```
+They differ in filters:
+  - attempt 1: status <> 'cancelled'
+  - attempt 3: (none)
+They differ in ranking:
+  - attempt 1: RANK
+  - attempt 2: ROW_NUMBER
+  (ROW_NUMBER keeps exactly one row per group and drops ties; RANK and DENSE_RANK keep ties)
+```
+
+---
+
+## Version-5: Confirm the Meaning First
+
+Version-4 showed that the hard failures were never SQL syntax. They were about **meaning**: count cancelled orders or not, keep ties or not. The model guessed, and more SQL tries just guessed again. Only the user knows what they meant, so Version-5 **asks before writing any SQL**.
+
+### How It Works
+
+1. The user asks a question.
+2. The model lists **up to 3 meanings** that would give different answers, each with its choices in plain words. A question with one sensible meaning gets one option.
+3. The user **picks one**, or picks **None of these** and explains. The explanation goes into the next set of options (max **3 sets**, then "please rephrase").
+4. The picked meaning goes to the SQL step (Version-4 rounds, checks and hard stop, unchanged), which must follow it.
+
+```
+Which did you mean?
+○ Count every order (including cancelled); if employees tie, show all of them
+○ Ignore cancelled orders; show all tied employees
+○ Only shipped or delivered orders; show all tied employees
+○ None of these → [explain what you meant]
+```
+
+Cost: **1 LLM call per set of options**.
+
+### Result: #20 (failed in Version-4)
+
+| | Version-4 | Version-5 |
+|---|---|---|
+| Result | ❌ (cancelled orders dropped) | ✅ all 16 rows |
+| Confidence | low | **high** (all 3 tries agreed) |
+| LLM calls | 6 | 1 (options) + 3 (SQL) |
+
+The options named the exact choices Version-4 got wrong. Once the meaning was picked, all 3 SQL tries agreed in round 1.
+
+Tested in the UI too: after **None of these** with *"count cancelled orders too; show everyone tied"*, every new option followed the comment, and the picked one gave all 16 correct rows.
+
+**Open issue:** the options can change between runs, and sometimes add choices the question never raised (e.g. "if tied, pick the employee hired earliest"). The user can still say None of these, but the prompt should offer only choices the question really leaves open.
+
+---
+
 ## Models
 
 | Version | Role | Model | Where |
@@ -436,6 +537,7 @@ LLM summaries vs column names: **same picks**, slightly better ranking (needed t
 | Version-1 | Answer writing | `openai/gpt-oss-20b` | Groq |
 | Version-2 | SQL generation | `openai/gpt-oss-120b` | Groq |
 | Version-3 | Table search (embeddings) | `all-mpnet-base-v2` (shared with Version-1) | Local (sentence-transformers) |
+| Version-5 | Meanings of the question | `openai/gpt-oss-120b` | Groq |
 | Version-3 | Table summaries (offline) | `openai/gpt-oss-120b` | Groq |
 
 Model names are set in `backend/config.py`. To see which models your Groq key can use, check the [Groq models page](https://console.groq.com/docs/models).
