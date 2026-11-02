@@ -1,0 +1,23 @@
+# Python environment and installed packages
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Secrets (API keys)
+.env
+
+# Database files (large; add your own locally)
+data/**/*.sqlite
+# ...except the small practice database (45 KB)
+!data/text_to_sql/retail_store/retail_store.sqlite
+
+# React: installed packages and build output
+frontend/node_modules/
+frontend/dist/
+
+# macOS
+.DS_Store

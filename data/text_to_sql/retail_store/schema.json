@@ -1,0 +1,402 @@
+{
+  "customers": {
+    "columns": [
+      {
+        "name": "customer_id",
+        "type": "INTEGER",
+        "primary_key": true
+      },
+      {
+        "name": "first_name",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "last_name",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "email",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "city",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "state",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "signup_date",
+        "type": "TEXT",
+        "primary_key": false
+      }
+    ],
+    "foreign_keys": [],
+    "row_count": 50
+  },
+  "employees": {
+    "columns": [
+      {
+        "name": "employee_id",
+        "type": "INTEGER",
+        "primary_key": true
+      },
+      {
+        "name": "first_name",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "last_name",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "title",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "store_id",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "manager_id",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "hire_date",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "salary",
+        "type": "INTEGER",
+        "primary_key": false
+      }
+    ],
+    "foreign_keys": [
+      {
+        "column": "manager_id",
+        "references": "employees.employee_id"
+      },
+      {
+        "column": "store_id",
+        "references": "stores.store_id"
+      }
+    ],
+    "row_count": 50
+  },
+  "order_items": {
+    "columns": [
+      {
+        "name": "order_item_id",
+        "type": "INTEGER",
+        "primary_key": true
+      },
+      {
+        "name": "order_id",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "product_id",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "quantity",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "unit_price_cents",
+        "type": "INTEGER",
+        "primary_key": false
+      }
+    ],
+    "foreign_keys": [
+      {
+        "column": "product_id",
+        "references": "products.product_id"
+      },
+      {
+        "column": "order_id",
+        "references": "orders.order_id"
+      }
+    ],
+    "row_count": 50
+  },
+  "orders": {
+    "columns": [
+      {
+        "name": "order_id",
+        "type": "INTEGER",
+        "primary_key": true
+      },
+      {
+        "name": "customer_id",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "store_id",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "employee_id",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "order_date",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "primary_key": false
+      }
+    ],
+    "foreign_keys": [
+      {
+        "column": "employee_id",
+        "references": "employees.employee_id"
+      },
+      {
+        "column": "store_id",
+        "references": "stores.store_id"
+      },
+      {
+        "column": "customer_id",
+        "references": "customers.customer_id"
+      }
+    ],
+    "row_count": 50
+  },
+  "payments": {
+    "columns": [
+      {
+        "name": "payment_id",
+        "type": "INTEGER",
+        "primary_key": true
+      },
+      {
+        "name": "order_id",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "method",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "amount_cents",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "primary_key": false
+      }
+    ],
+    "foreign_keys": [
+      {
+        "column": "order_id",
+        "references": "orders.order_id"
+      }
+    ],
+    "row_count": 50
+  },
+  "products": {
+    "columns": [
+      {
+        "name": "product_id",
+        "type": "INTEGER",
+        "primary_key": true
+      },
+      {
+        "name": "product_name",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "category",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "supplier_id",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "unit_price_cents",
+        "type": "INTEGER",
+        "primary_key": false
+      }
+    ],
+    "foreign_keys": [
+      {
+        "column": "supplier_id",
+        "references": "suppliers.supplier_id"
+      }
+    ],
+    "row_count": 50
+  },
+  "reviews": {
+    "columns": [
+      {
+        "name": "review_id",
+        "type": "INTEGER",
+        "primary_key": true
+      },
+      {
+        "name": "product_id",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "customer_id",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "rating",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "review_text",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "review_date",
+        "type": "TEXT",
+        "primary_key": false
+      }
+    ],
+    "foreign_keys": [
+      {
+        "column": "customer_id",
+        "references": "customers.customer_id"
+      },
+      {
+        "column": "product_id",
+        "references": "products.product_id"
+      }
+    ],
+    "row_count": 50
+  },
+  "shipments": {
+    "columns": [
+      {
+        "name": "shipment_id",
+        "type": "INTEGER",
+        "primary_key": true
+      },
+      {
+        "name": "order_id",
+        "type": "INTEGER",
+        "primary_key": false
+      },
+      {
+        "name": "carrier",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "shipped_date",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "delivered_date",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "primary_key": false
+      }
+    ],
+    "foreign_keys": [
+      {
+        "column": "order_id",
+        "references": "orders.order_id"
+      }
+    ],
+    "row_count": 50
+  },
+  "stores": {
+    "columns": [
+      {
+        "name": "store_id",
+        "type": "INTEGER",
+        "primary_key": true
+      },
+      {
+        "name": "store_name",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "city",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "state",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "opened_date",
+        "type": "TEXT",
+        "primary_key": false
+      }
+    ],
+    "foreign_keys": [],
+    "row_count": 50
+  },
+  "suppliers": {
+    "columns": [
+      {
+        "name": "supplier_id",
+        "type": "INTEGER",
+        "primary_key": true
+      },
+      {
+        "name": "supplier_name",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "country",
+        "type": "TEXT",
+        "primary_key": false
+      },
+      {
+        "name": "contact_email",
+        "type": "TEXT",
+        "primary_key": false
+      }
+    ],
+    "foreign_keys": [],
+    "row_count": 50
+  }
+}

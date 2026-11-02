@@ -1,0 +1,72 @@
+[
+  {
+    "id": "doc1_chunk0",
+    "path": "data/rag/raw_docs/doc1.txt",
+    "text": "The human heart is a muscular organ responsible for pumping blood throughout the body. It consists of four chambers: two atria and two ventricles. Oxygen-poor blood returns from the body to the right atrium, moves to the right ventricle, and",
+    "source": "doc1",
+    "collection": "default"
+  },
+  {
+    "id": "doc1_chunk1",
+    "path": "data/rag/raw_docs/doc1.txt",
+    "text": "to the right atrium, moves to the right ventricle, and is pumped to the lungs. Oxygen-rich blood returns from the lungs to the left atrium, moves to the left ventricle, and is pumped out to the rest of the body.",
+    "source": "doc1",
+    "collection": "default"
+  },
+  {
+    "id": "doc1_chunk2",
+    "path": "data/rag/raw_docs/doc1.txt",
+    "text": "and is pumped out to the rest of the body. Common heart-related conditions include arrhythmia, heart failure, and coronary artery disease.",
+    "source": "doc1",
+    "collection": "default"
+  },
+  {
+    "id": "doc2_chunk0",
+    "path": "data/rag/raw_docs/doc2.txt",
+    "text": "An X-ray image can reveal abnormalities in the lungs, bones, and heart silhouette. For example, fluid in the lungs may appear as opaque regions, while healthy lung tissue looks darker. Radiologists interpret these patterns along with patient symptoms to form",
+    "source": "doc2",
+    "collection": "default"
+  },
+  {
+    "id": "doc2_chunk1",
+    "path": "data/rag/raw_docs/doc2.txt",
+    "text": "Radiologists interpret these patterns along with patient symptoms to form a diagnosis.",
+    "source": "doc2",
+    "collection": "default"
+  },
+  {
+    "id": "heart_notes_chunk0",
+    "path": "data/rag/raw_docs/heart_notes.txt",
+    "text": "The human heart is a muscular organ responsible for pumping blood throughout the body. It consists of four chambers: two atria and two ventricles. Oxygen-poor blood returns from the body to the right atrium, moves to the right ventricle, and",
+    "source": "heart_notes",
+    "collection": "default"
+  },
+  {
+    "id": "heart_notes_chunk1",
+    "path": "data/rag/raw_docs/heart_notes.txt",
+    "text": "to the right atrium, moves to the right ventricle, and is pumped to the lungs. Oxygen-rich blood returns from the lungs to the left atrium, moves to the left ventricle, and is pumped out to the rest of the body.",
+    "source": "heart_notes",
+    "collection": "default"
+  },
+  {
+    "id": "heart_notes_chunk2",
+    "path": "data/rag/raw_docs/heart_notes.txt",
+    "text": "and is pumped out to the rest of the body. Common heart-related conditions include arrhythmia, heart failure, and coronary artery disease.",
+    "source": "heart_notes",
+    "collection": "default"
+  },
+  {
+    "id": "lung_notes_chunk0",
+    "path": "data/rag/raw_docs/lung_notes.txt",
+    "text": "An X-ray image can reveal abnormalities in the lungs, bones, and heart silhouette. For example, fluid in the lungs may appear as opaque regions, while healthy lung tissue looks darker. Radiologists interpret these patterns along with patient symptoms to form",
+    "source": "lung_notes",
+    "collection": "default"
+  },
+  {
+    "id": "lung_notes_chunk1",
+    "path": "data/rag/raw_docs/lung_notes.txt",
+    "text": "Radiologists interpret these patterns along with patient symptoms to form a diagnosis.",
+    "source": "lung_notes",
+    "collection": "default"
+  }
+]

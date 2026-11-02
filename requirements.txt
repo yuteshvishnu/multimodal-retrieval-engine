@@ -1,8 +1,14 @@
+# Server
 fastapi
 uvicorn
-numpy
 pydantic
 python-multipart
+python-dotenv
 
+# LLM (Groq, via the OpenAI-compatible API)
+openai
+
+# Version-1: RAG
+numpy
 torch
 sentence-transformers
