@@ -1,4 +1,5 @@
 import threading
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import List, Optional
@@ -12,6 +13,7 @@ from backend.text_to_sql.checks import (
 )
 from backend.text_to_sql.database import QueryTimeout, SQLiteDatabase
 from backend.text_to_sql.results import ResultCache
+from backend.text_to_sql.sql_errors import ErrorBook, normalize
 from backend.text_to_sql.interpreter import QuestionInterpreter
 from backend.text_to_sql.safety import write_message, write_problems, write_request
 from backend.text_to_sql.schema_index import SchemaIndex
@@ -43,6 +45,9 @@ class TextToSQLPipeline:
     def __init__(self, use_retrieval: bool = True, top_k: int = TOP_K_TABLES):
         self.generator = SQLGenerator()
         self.interpreter = QuestionInterpreter()
+        # Version-9: SQLite errors already seen: rules for the prompt, hints for retries
+        self.errors = ErrorBook()
+        self.generator.rules = self.errors.rules
         self.top_k = top_k
         self.use_retrieval = use_retrieval
         self._reload_lock = threading.Lock()
@@ -132,6 +137,7 @@ class TextToSQLPipeline:
         # 3) SQL in rounds, with a hard stop on LLM calls
         budget = CallBudget(MAX_LLM_CALLS_PER_QUESTION)
         attempts, chosen, confidence, feedback, feedback_sent = [], None, None, "", []
+        stopped_early = False
 
         while budget.left > 0 and chosen is None:
             round_no = len(attempts) // SQL_CALLS_PER_ROUND + 1
@@ -170,6 +176,28 @@ class TextToSQLPipeline:
                 ])
                 return result
 
+            # Version-9: look up every SQLite error in the error book, and log it
+            for a in new:
+                if a.get("error"):
+                    known = self.errors.match(a["error"], a["sql"] or "")
+                    a["known_error"] = known["id"] if known else None
+                    a["hint"] = known["hint"] if known else None
+                    self.errors.log({
+                        "type": "error", "question": query_text, "meaning": meaning, "round": round_no,
+                        "sql": a["sql"], "error": a["error"], "normalized": normalize(a["error"]),
+                        "known_id": a["known_error"],
+                    })
+
+            # every round-1 try hit the same error and nobody has a fix for it yet:
+            # round 2 would only repeat it, so stop and save the LLM calls
+            if (
+                round_no == 1 and new and all(a.get("error") for a in new)
+                and not any(a.get("hint") for a in new)
+                and len({normalize(a["error"]) for a in new}) == 1
+            ):
+                stopped_early = True
+                break
+
             valid = [a for a in attempts if a["status"] == "ok"]
             if round_no == 1:
                 group = self._largest_agreeing_group([a for a in new if a["status"] == "ok"])
@@ -199,13 +227,16 @@ class TextToSQLPipeline:
         ]
         print(f"[Pipeline] {budget.used} LLM calls, confidence: {confidence}")
 
+        self._log_outcome(query_text, meaning, attempts, chosen is not None, budget.used, stopped_early)
+
         if chosen is None:
             last = next((a for a in reversed(attempts) if a["sql"]), None)
             reasons = attempts[-1]["problems"] if attempts else []
             return {
                 "sql": last["sql"] if last else None,
                 "tables": table_names,
-                "error": "Could not produce a valid query. " + " ".join(reasons),
+                "error": self._failure_message(attempts, stopped_early),
+                "failure_reason": " ".join(reasons),
                 "llm_calls": budget.used,
                 "attempts": summary,
                 "feedback": "\n\n".join(f for f in feedback_sent if f),
@@ -239,6 +270,38 @@ class TextToSQLPipeline:
             "attempts": summary,
             "feedback": "\n\n".join(f for f in feedback_sent if f),
         }
+
+    @staticmethod
+    def _failure_message(attempts: List[dict], stopped_early: bool) -> str:
+        """A plain-English failure the user can act on; the raw errors stay in the attempts."""
+        errors = [normalize(a["error"]) for a in attempts if a.get("error")]
+        tries = len(attempts)
+        if errors and len(errors) == tries and len(set(errors)) == 1:
+            message = (
+                f"Scout couldn't build a working query for this question: SQLite rejected all {tries} "
+                f"tries for the same reason ({errors[0]})."
+            )
+            if stopped_early:
+                message += " It stopped after the first round to save LLM calls, since there's no known fix for this error yet."
+        else:
+            reason = Counter(errors).most_common(1)[0][0] if errors else "no valid query"
+            message = f"Scout couldn't build a working query for this question after {tries} tries ({reason})."
+        return message + " Try simpler wording, or ask for fewer things at once."
+
+    def _log_outcome(
+        self, question: str, meaning: str, attempts: List[dict], fixed: bool, llm_calls: int, stopped_early: bool
+    ) -> None:
+        """How a question that hit SQL errors ended: did the hints help? (for the report)"""
+        errored = [a for a in attempts if a.get("error")]
+        if not errored:
+            return
+        self.errors.log({
+            "type": "outcome", "question": question, "meaning": meaning, "fixed": fixed, "llm_calls": llm_calls,
+            "stopped_early": stopped_early,
+            "errors": sorted({normalize(a["error"]) for a in errored}),
+            "known_ids": sorted({a["known_error"] for a in errored if a.get("known_error")}),
+            "first_round_errors": sum(1 for a in errored if a["round"] == 1),
+        })
 
     @staticmethod
     def _too_heavy(attempts: List[dict], llm_calls: int) -> dict:
@@ -325,7 +388,7 @@ class TextToSQLPipeline:
         try:
             self.database.explain(sql)
         except Exception as e:
-            attempt.update(status="rejected", problems=[f"Invalid SQL: {e}"])
+            attempt.update(status="rejected", problems=[f"Invalid SQL: {e}"], error=str(e))
             return attempt
 
         errors, warnings = check_sql(sql, tables, now.date())
@@ -350,7 +413,7 @@ class TextToSQLPipeline:
             attempt.update(status="timeout", problems=[str(e)])
             return attempt
         except Exception as e:
-            attempt.update(status="failed", problems=[f"Query failed: {e}"])
+            attempt.update(status="failed", problems=[f"Query failed: {e}"], error=str(e))
             return attempt
 
         attempt.update(
@@ -392,6 +455,10 @@ class TextToSQLPipeline:
         disagreed, exactly where their SQL differs plus the descriptions of those columns.
         """
         lines = list(dict.fromkeys(f"- {problem}" for a in attempts for problem in a["problems"]))
+        # Version-9: for errors in the error book, say exactly how to fix them in SQLite
+        hints = list(dict.fromkeys(a["hint"] for a in attempts if a.get("hint")))
+        if hints:
+            lines.append("How to fix this in SQLite:\n" + "\n".join(f"- {hint}" for hint in hints))
         ok = [a for a in attempts if a["status"] == "ok"]
         if len({a["signature"] for a in ok}) > 1:
             lines.append(

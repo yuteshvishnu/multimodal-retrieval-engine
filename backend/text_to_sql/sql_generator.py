@@ -52,6 +52,8 @@ class SQLGenerator:
         self.api_key = GROQ_API_KEY
         self.model_name = GROQ_MODEL_SQL
         self.client = None
+        # Version-9: returns the error book's one-line SQLite rules, added to the prompt
+        self.rules = None
 
     def generate(
         self,
@@ -84,12 +86,18 @@ class SQLGenerator:
         completion = self.client.chat.completions.create(
             model=self.model_name,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": self._system_prompt()},
                 {"role": "user", "content": prompt},
             ],
             temperature=temperature,
         )
         return self._extract_sql(completion.choices[0].message.content or "")
+
+    def _system_prompt(self) -> str:
+        rules = self.rules() if self.rules else []
+        if not rules:
+            return SYSTEM_PROMPT
+        return SYSTEM_PROMPT + "\nSQLite rules (mistakes seen before, avoid them):\n" + "\n".join(f"- {r}" for r in rules)
 
     def _extract_sql(self, text: str) -> str:
         # models often wrap the query in ```sql ... ``` fences

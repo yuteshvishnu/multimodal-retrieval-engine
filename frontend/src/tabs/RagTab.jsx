@@ -13,6 +13,7 @@ export default function RagTab({ refreshKey = 0 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const inputRef = useRef(null);
 
   async function ask(text) {
     setLoading(true);
@@ -38,6 +39,14 @@ export default function RagTab({ refreshKey = 0 }) {
       .catch(() => setDocuments([]));
   }, [refreshKey]);
 
+  // clear the answer and start a fresh question (the document choice is kept)
+  function startOver() {
+    setQuestion("");
+    setResult(null);
+    setError("");
+    inputRef.current?.focus();
+  }
+
   function handleSubmit(event) {
     event.preventDefault();
     ask(question);
@@ -62,6 +71,7 @@ export default function RagTab({ refreshKey = 0 }) {
           <label className="search-field">
             <Icon name="search" size={18} />
             <input
+              ref={inputRef}
               type="text"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
@@ -74,6 +84,12 @@ export default function RagTab({ refreshKey = 0 }) {
             Ask
             <Icon name="arrow" />
           </button>
+          {(result || error) && !loading && (
+            <button type="button" className="btn btn-secondary" onClick={startOver}>
+              <Icon name="refresh" />
+              New question
+            </button>
+          )}
         </div>
 
         <DocumentPicker documents={documents} selected={selected} onChange={setSelected} />

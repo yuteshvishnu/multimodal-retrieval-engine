@@ -27,3 +27,6 @@ frontend/dist/
 
 # Scribe answer feedback (contains users' questions)
 data/rag/feedback/
+
+# Scout SQL error log (contains users' questions); the known errors file is tracked
+data/text_to_sql/logs/

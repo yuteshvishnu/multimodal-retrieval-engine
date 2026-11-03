@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { getJson, postForm } from "../api.js";
 import { CopyButton, DataTable, ErrorAlert, Icon, LimitAlert, Loading, Pagination, SafetyAlert, SqlCode } from "../components/ui.jsx";
 
@@ -34,6 +34,7 @@ export default function SqlTab() {
   const [history, setHistory] = useState([]); // rejected sets of options + the user's comment
   const [picked, setPicked] = useState(null); // option index, or "none"
   const [comment, setComment] = useState("");
+  const inputRef = useRef(null);
   const [lastAnswer, setLastAnswer] = useState(null); // {question, meaning, sql} of the latest answer
   const [followUp, setFollowUp] = useState(false); // ask the next question as a follow-up to it
 
@@ -118,6 +119,21 @@ export default function SqlTab() {
     }
   }
 
+  // clear the answer and start a fresh question (the last answer stays available to follow up on)
+  function startOver() {
+    setQuestion("");
+    setResult(null);
+    setClarify(null);
+    setHistory([]);
+    setPicked(null);
+    setComment("");
+    setError("");
+    setSafety("");
+    setLimit("");
+    setFollowUp(false);
+    inputRef.current?.focus();
+  }
+
   const busy = loading !== "";
   const idle = !busy && !clarify && !result && !error && !safety && !limit;
 
@@ -133,6 +149,7 @@ export default function SqlTab() {
           <label className="search-field">
             <Icon name="search" size={18} />
             <input
+              ref={inputRef}
               type="text"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
@@ -145,6 +162,12 @@ export default function SqlTab() {
             Ask
             <Icon name="arrow" />
           </button>
+          {!idle && !busy && (
+            <button type="button" className="btn btn-secondary" onClick={startOver}>
+              <Icon name="refresh" />
+              New question
+            </button>
+          )}
         </div>
 
         {lastAnswer && (
@@ -265,6 +288,9 @@ export default function SqlTab() {
 }
 
 function SqlResult({ result }) {
+  // no query worked: the message is shown above; here only what was tried (Version-9)
+  if (result.error) return <Attempts attempts={result.attempts} />;
+
   const meaning = result.meaning ? splitMeaning(result.meaning) : null;
   // page 1 comes with the answer; other pages are loaded from the server when clicked (Version-8)
   const [view, setView] = useState({ page: 1, rows: result.rows });
@@ -379,31 +405,37 @@ function SqlResult({ result }) {
         <SqlCode sql={result.sql} />
       </div>
 
-      {result.attempts?.length > 0 && (
-        <details className="card attempts">
-          <summary>
-            <span className="card-title">
-              <Icon name="layers" />
-              All attempts
-              <span className="tag">{result.attempts.length}</span>
-            </span>
-            <span className="chevron">
-              <Icon name="chevron" />
-            </span>
-          </summary>
-          {result.attempts.map((a, i) => (
-            <div key={i} className="attempt">
-              <div className="attempt-head">
-                <strong>Attempt {i + 1}</strong>
-                <span>· Round {a.round} ·</span>
-                <span className={`status-${a.status}`}>{a.status}</span>
-              </div>
-              {a.problems.length > 0 && <p className="problems">{a.problems.join(" ")}</p>}
-              {a.sql && <SqlCode sql={a.sql} />}
-            </div>
-          ))}
-        </details>
-      )}
+      <Attempts attempts={result.attempts} />
     </>
+  );
+}
+
+// Every SQL the model wrote and what happened to it, collapsed by default.
+function Attempts({ attempts, open = false }) {
+  if (!attempts?.length) return null;
+  return (
+    <details className="card attempts" open={open}>
+      <summary>
+        <span className="card-title">
+          <Icon name="layers" />
+          All attempts
+          <span className="tag">{attempts.length}</span>
+        </span>
+        <span className="chevron">
+          <Icon name="chevron" />
+        </span>
+      </summary>
+      {attempts.map((a, i) => (
+        <div key={i} className="attempt">
+          <div className="attempt-head">
+            <strong>Attempt {i + 1}</strong>
+            <span>· Round {a.round} ·</span>
+            <span className={`status-${a.status}`}>{a.status}</span>
+          </div>
+          {a.problems.length > 0 && <p className="problems">{a.problems.join(" ")}</p>}
+          {a.sql && <SqlCode sql={a.sql} />}
+        </div>
+      ))}
+    </details>
   );
 }

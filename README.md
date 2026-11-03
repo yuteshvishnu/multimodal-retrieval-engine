@@ -26,8 +26,10 @@ Rexie answers questions **only from our own data**. It's one app with two produc
   - [Version-6: Know Your Tables](#version-6-know-your-tables)
   - [Version-7: Safety (Read-Only)](#version-7-safety-read-only)
   - [Version-8: Performance (Heavy Queries)](#version-8-performance-heavy-queries)
+  - [Version-9: Error Book (Learning from SQL Errors)](#version-9-error-book-learning-from-sql-errors)
 - [The App (UI)](#the-app-ui)
 - [Fixes](#fixes)
+- [Known Issues](#known-issues)
 - [Models](#models)
 
 ## Goal
@@ -67,6 +69,7 @@ multimodal-retrieval-engine/
 │       ├── interpreter.py   #   Version-5: up to 3 meanings of the question for the user to pick
 │       ├── safety.py        #   Version-7: blocks anything that could change a database
 │       ├── results.py       #   Version-8: recent results kept for paging (LRU cache)
+│       ├── sql_errors.py    #   Version-9: the error book (known SQLite errors, hints, log)
 │       └── catalog.py       #   Version-6: table list (10 per page), adding a .sqlite database
 ├── frontend/                # React app (Vite)
 │   └── src/
@@ -76,7 +79,9 @@ multimodal-retrieval-engine/
 ├── data/
 │   ├── rag/                 # Scribe: documents (raw_docs), built index, eval set
 │   └── text_to_sql/         # Scout: one folder per database
-│       └── retail_store/    #   practice DB, descriptions, 20 questions + answers
+│       ├── retail_store/    #   practice DB, descriptions, 20 questions + answers
+│       ├── sql_errors.json  #   Version-9: known SQLite errors and their fixes (edit by hand)
+│       └── logs/            #   Version-9: SQL error log (git-ignored)
 ├── tests/                   # pytest: the deterministic rules, no API key or LLM calls
 ├── scripts/
 │   ├── rag/                 # build the index, retrieval eval, RAGAS metrics
@@ -141,7 +146,8 @@ Open **http://localhost:8000** and pick a product: **Scribe** (views: **Ask**, *
 | Summarize new/changed tables (LLM), then embed | `python -m scripts.text_to_sql.build_schema_index` |
 | Re-embed only, no LLM calls | `python -m scripts.text_to_sql.build_schema_index --skip-summaries` |
 | Run only some questions | `python -m scripts.text_to_sql.evaluate --ids 3,7,8` |
-| Run the tests (no API key, ~7 s) | `python -m pytest` |
+| Run the tests (no API key, ~10 s) | `python -m pytest` |
+| Report on SQL errors: what to add to the error book | `python -m scripts.text_to_sql.sql_errors` |
 | Score Scout the way the app works (confirm the meaning first) | `python -m scripts.text_to_sql.evaluate --confirm` |
 | API docs (auto-generated) | http://localhost:8000/docs |
 
@@ -350,6 +356,7 @@ Each version fixed a problem the previous one exposed.
 | **Version-6:** Know your tables | A wrong table description misleads every question | The user sees, fixes and adds tables |
 | **Version-7:** Safety | A question or the LLM's SQL could change the database | Deterministic write checks on the question, the meaning and the SQL |
 | **Version-8:** Performance | A heavy query can be slow or return huge results | Size estimate before running, time limit, 200-row limit, paging from a cache |
+| **Version-9:** Error book | The model repeats SQL mistakes from other dialects, and retries can't fix them | Known SQLite errors → prompt rules + fix hints; log + report to grow it; early stop; clear failures |
 
 ---
 
@@ -670,6 +677,41 @@ If every try in a round is too big or too slow, Scout **stops** (no round 2, no 
 
 ---
 
+### Version-9: Error Book (Learning from SQL Errors)
+
+[Issue 1](#issue-1-scout-fails-on-sql-from-another-dialect-and-retries-cant-fix-it) showed that a SQL mistake the model learned from another database (MySQL/PostgreSQL) gets repeated on every retry: the retry only saw SQLite's raw error, not how to fix it. Now every SQLite error Scout sees is **looked up, logged and learned from**, deterministically: a person decides what goes in, never the LLM (a wrong hint would be repeated forever).
+
+**Two files**
+
+| File | What | In git? |
+|---|---|---|
+| `data/text_to_sql/sql_errors.json` | **Known errors**: how to recognise each (`match` on the message, optional `sql_match` on the SQL for vague messages like `near "5": syntax error`), the `hint` for the retry, a one-line `rule` for the prompt, a bad/fixed example | ✅ edited by hand, re-read on change (no restart) |
+| `data/text_to_sql/logs/sql_errors.jsonl` | **Error log**: every rejected attempt (question, SQL, error, which entry matched) and how each question ended (answered or not, stopped early) | ❌ git-ignored: holds users' questions |
+
+**How it works**
+
+```
+before:  the 10 most-seen errors' rules go into the SQL prompt   → avoided in round 1
+SQLite rejects a try → normalise ("no such column: o.statuss" → "no such column: <name>")
+         ├── known   → its hint goes into round 2: "How to fix this in SQLite: ..."
+         └── unknown → if all 3 round-1 tries hit it: stop, skip round 2 (save 3 LLM calls)
+         └── logged either way
+fails:   "Scout couldn't build a working query for this question: SQLite rejected all 3 tries for
+          the same reason (...). Try simpler wording..."  (raw errors stay in All attempts)
+```
+
+**Growing it:** `python -m scripts.text_to_sql.sql_errors` lists **unknown errors** (grouped, counted, with an example question and SQL: write a hint and add them) and, for each **known error**, how often it was seen and how often the question still got an answer afterwards (a hint that rarely helps needs rewriting).
+
+**Starts with 15 entries**, each checked against SQLite's **real** message (not guessed): `GROUP_CONCAT(DISTINCT x, sep)`, MySQL/PostgreSQL date functions (`YEAR()`, `DATE_TRUNC`, `NOW()`, `DATEDIFF`, `TO_CHAR`…), `EXTRACT`, `INTERVAL`, `ILIKE`, `TOP n` / `FETCH FIRST`, aggregates or window functions in `WHERE`, `HAVING` without `GROUP BY`, unknown column / table, keywords used as names, ambiguous columns, multi-column subqueries in `IN`, wrong argument counts. Checking found that SQLite 3.53 **does** support `STRING_AGG` and `CONCAT`, so they got no entry.
+
+**Also:** the meaning step now has to make its **first option the plain, literal reading** and not add columns or filters (see [Version-5](#version-5-confirm-the-meaning-first)'s open issue).
+
+**Tested:**
+- 22 new tests (no LLM): every entry matches its real SQLite error; an unrelated error stays unknown; a stand-in LLM making the `GROUP_CONCAT` mistake got the hint in round 2 and answered; an unknown error in all 3 round-1 tries stopped after 3 calls with the plain message; the rules reach the prompt. All 88 tests pass.
+- Real LLM, Issue 1's question again: option 1 is now *"every different full name"* (no city); and with the old *"…along with their city"* meaning, all 3 tries **succeeded in 3 calls** (was: 6 failed calls). The prompt rules prevented the mistake. Options 2–3 still added filters ("placed an order", "signed up after 2025"), so the literal-first rule helps but doesn't fully stop invented options.
+
+---
+
 ## The App (UI)
 
 Both products share one React app, designed to look like a finished product instead of a demo:
@@ -710,6 +752,69 @@ A review of everything built so far turned up gaps that weren't new features but
 | **No login** | Optional `APP_PASSWORD` in `.env`: the browser asks for it before anything loads (HTTP Basic). Empty = no login, fine on your own machine | `main.py`, `.env.example` |
 
 **Not done (bigger than a fix):** running **BIRD** for Scout and **raising Scribe's RAGAS scores** are the next projects, not gaps.
+
+---
+
+## Known Issues
+
+Logged after diagnosing.
+
+### Issue 1: Scout fails on SQL from another dialect, and retries can't fix it
+
+> **Status: fixed in [Version-9](#version-9-error-book-learning-from-sql-errors)** (error book, prompt rules, fix hints, early stop, plain failure message, literal-first options). Still open: the meaning options can add filters the question didn't ask for.
+
+**What happened.** Question: *"list all unique customer names"*. The option picked in the confirm-the-meaning step was *"list all customers, only unique customer names along with their city"*. Result: *"Could not produce a valid query. Invalid SQL: DISTINCT aggregates must have exactly one argument"*, after **6 LLM calls**, with **all 6 attempts** making the same mistake:
+
+```sql
+SELECT MIN(first_name) || ' ' || MIN(last_name) AS full_name,
+       GROUP_CONCAT(DISTINCT city, ', ') AS cities
+FROM customers
+GROUP BY LOWER(first_name), LOWER(last_name)
+```
+
+**Causes (stacked):**
+
+1. **The meaning step made the question harder.** "Unique names" alone is `SELECT DISTINCT first_name, last_name` (48 names). The option added *"along with their city"*, and one name (Ananya Kim) lives in two cities, so the model had to merge cities into one row with `GROUP_CONCAT`. (Same open issue as Version-5: options add things the question never asked.)
+2. **Wrong dialect.** `GROUP_CONCAT(DISTINCT x, ', ')` (DISTINCT *and* a separator) is fine in MySQL / PostgreSQL (`STRING_AGG`), but SQLite allows only one argument with DISTINCT. Checked on SQLite 3.53:
+
+   | Variant | Result |
+   |---|---|
+   | `GROUP_CONCAT(DISTINCT city, ', ')` | ❌ this error |
+   | `GROUP_CONCAT(DISTINCT city)` | ✅ `San Francisco,NY` |
+   | `GROUP_CONCAT(city, ', ')` | ✅ `San Francisco, NY` |
+
+   The prompt says "SQLite", but the model has seen far more MySQL/PostgreSQL and reuses their habits.
+3. **The retry had no fix to work with.** `EXPLAIN` correctly rejected the SQL before it ran (no wrong answer shown), but round 2 was only given the raw error, so all 3 retries repeated the same idiom. 6 calls were spent on a failure that was predictable after round 1 (all 3 tries, same error).
+4. **The failure looks like an answer.** The user sees a raw database error they can't act on (they never wrote SQL), plus "Rows 0, Confidence —" and the SQL card.
+
+Also seen: 5 tables were sent for a question that only needs `customers`.
+
+**Fix ideas (not done):** a fixed table mapping known SQLite errors to a concrete fix ("use `GROUP_CONCAT(DISTINCT city)` without a separator") for the retry; spotting and translating MySQL/PostgreSQL idioms with sqlglot before running; stopping early when every round-1 try fails with the same error; a plain-English failure message instead of the raw error and empty stats; options that stay within what the question asked.
+
+
+### Issue 2: No way to start a new question after an answer
+
+> **Status: fixed.**
+
+**What happened.** After an answer (or a blocked / failed question) there was no clear way to start over: the old question, answer and messages stayed on screen.
+
+**Fix.** A **New question** button appears next to **Ask** once there's something on screen, in both Scout and Scribe. It clears the question, the answer, the meaning options and any message, and puts the cursor back in the question box. Scout keeps the last answer available for **Follow up on "…"**; Scribe keeps the chosen documents.
+
+### Issue 3: The answer isn't explained
+
+> **Status: open (planned for the next version).**
+
+**What happened.** Scout shows the result table and the tables used, but not *why*: how the question was turned into this answer isn't clear to a user.
+
+**Plan.** Add **reasoning**: a short plain-English explanation of how the answer was built (which tables, which filters, how it was grouped and counted), so the user can check it without reading SQL.
+
+### Issue 4: "All attempts" and the stats aren't useful to most users
+
+> **Status: open (planned for the next version).**
+
+**What happened.** Every SQL attempt is listed under the answer. That's detail for developers, not something a user needs while reading the answer; and metrics like confidence and LLM calls aren't explained.
+
+**Plan.** Move the attempts out of the answer into a separate section: a **dashboard** that explains each metric (confidence, LLM calls, rounds, attempts and why each was rejected), keeping the answer view focused on the answer.
 
 ---
 

@@ -1,0 +1,140 @@
+[
+  {
+    "id": "distinct-aggregate-separator",
+    "match": "DISTINCT aggregates must have exactly one argument",
+    "hint": "SQLite allows DISTINCT or a separator in GROUP_CONCAT, not both. Use GROUP_CONCAT(DISTINCT city) (comma separator), or select the distinct values in a subquery first and then use GROUP_CONCAT(city, ', ').",
+    "rule": "GROUP_CONCAT(DISTINCT x) takes no separator; for a custom separator, de-duplicate in a subquery first",
+    "example_bad": "GROUP_CONCAT(DISTINCT city, ', ')",
+    "example_fix": "GROUP_CONCAT(DISTINCT city)",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "date-functions",
+    "match": "no such function: (DATE_TRUNC|DATE_PART|DATE_FORMAT|DATEDIFF|DATEADD|DATE_ADD|DATE_SUB|YEAR|MONTH|DAY|HOUR|NOW|GETDATE|CURDATE|SYSDATE|TO_CHAR|TO_DATE|TO_TIMESTAMP|AGE|LAST_DAY)\\b",
+    "hint": "SQLite has no such date function. Use strftime('%Y', d) for the year, strftime('%Y-%m', d) for the month, date('now') for today, date(d, '-7 days') to add or subtract, and julianday(a) - julianday(b) for the days between two dates. Dates must be in YYYY-MM-DD form first (convert other formats with substr).",
+    "rule": "dates: use strftime / date / julianday, not DATE_TRUNC, YEAR(), NOW(), DATEDIFF or TO_CHAR",
+    "example_bad": "YEAR(signup_date) = 2026",
+    "example_fix": "strftime('%Y', signup_date) = '2026'",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "extract",
+    "match": "syntax error",
+    "sql_match": "\\bEXTRACT\\s*\\(",
+    "hint": "SQLite has no EXTRACT. Use strftime('%Y', d) for the year, strftime('%m', d) for the month and strftime('%d', d) for the day.",
+    "rule": "no EXTRACT(... FROM d): use strftime('%Y', d)",
+    "example_bad": "EXTRACT(YEAR FROM order_date)",
+    "example_fix": "strftime('%Y', order_date)",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "interval",
+    "match": "syntax error",
+    "sql_match": "\\bINTERVAL\\b",
+    "hint": "SQLite has no INTERVAL. Add or subtract time with date(d, '-7 days'), date(d, '+1 month') or datetime('now', '-1 hour').",
+    "rule": "no INTERVAL: use date(d, '-7 days')",
+    "example_bad": "CURRENT_DATE - INTERVAL '7 days'",
+    "example_fix": "date('now', '-7 days')",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "ilike",
+    "match": "near \"ILIKE\": syntax error",
+    "hint": "SQLite has no ILIKE. LIKE already ignores case for English letters, or use LOWER(col) LIKE 'new%'.",
+    "rule": "no ILIKE: LIKE is already case-insensitive for English letters",
+    "example_bad": "city ILIKE 'new%'",
+    "example_fix": "city LIKE 'new%'",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "top-or-fetch",
+    "match": "syntax error",
+    "sql_match": "\\bSELECT\\s+(DISTINCT\\s+)?TOP\\s+\\d+|\\bFETCH\\s+(FIRST|NEXT)\\b",
+    "hint": "SQLite has no SELECT TOP n or FETCH FIRST n ROWS. Put LIMIT n at the end of the query.",
+    "rule": "limit rows with LIMIT n at the end, not SELECT TOP n or FETCH FIRST",
+    "example_bad": "SELECT TOP 5 * FROM customers",
+    "example_fix": "SELECT * FROM customers LIMIT 5",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "aggregate-in-where",
+    "match": "misuse of aggregate",
+    "hint": "An aggregate (COUNT, SUM, AVG, MAX, MIN) can't be used in WHERE. Filter on it with HAVING after GROUP BY, or compute it in a subquery first.",
+    "rule": "filter on COUNT/SUM/... with HAVING, not WHERE",
+    "example_bad": "WHERE COUNT(*) > 2 GROUP BY store_id",
+    "example_fix": "GROUP BY store_id HAVING COUNT(*) > 2",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "window-in-where",
+    "match": "misuse of window function",
+    "hint": "A window function (ROW_NUMBER, RANK, ...) can't be used in WHERE. Compute it in a WITH step or subquery, then filter on its alias in the outer query.",
+    "rule": "filter on ROW_NUMBER()/RANK() in an outer query, not in WHERE",
+    "example_bad": "WHERE ROW_NUMBER() OVER (ORDER BY id) = 1",
+    "example_fix": "WITH r AS (SELECT *, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM t) SELECT * FROM r WHERE rn = 1",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "having-without-group-by",
+    "match": "HAVING clause on a non-aggregate query",
+    "hint": "HAVING needs a GROUP BY (or an aggregate). Add the GROUP BY, or move the condition to WHERE.",
+    "rule": "HAVING only with GROUP BY",
+    "example_bad": "SELECT store_id FROM orders HAVING COUNT(*) > 2",
+    "example_fix": "SELECT store_id FROM orders GROUP BY store_id HAVING COUNT(*) > 2",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "unknown-column",
+    "match": "no such column",
+    "hint": "That column doesn't exist where it was used. Use only columns listed in the schema, check the spelling, and qualify it with the right table alias (e.g. o.status). A WITH step only has the columns it selects.",
+    "rule": "use only columns from the schema, qualified with the right table alias",
+    "example_bad": "SELECT statuss FROM orders",
+    "example_fix": "SELECT status FROM orders",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "unknown-table",
+    "match": "no such table",
+    "hint": "That table doesn't exist. Use only the tables in the schema, with their exact names (e.g. orders, not order or sales).",
+    "rule": "use only tables from the schema, with their exact names",
+    "example_bad": "SELECT * FROM sales",
+    "example_fix": "SELECT * FROM orders",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "reserved-word",
+    "match": "near \"(ORDER|GROUP|SELECT|TABLE|INDEX|KEY|FROM|WHERE|LIMIT|VALUES|DEFAULT|CHECK|TRANSACTION)\": syntax error",
+    "hint": "A keyword appears where a name was expected. Check the table name (e.g. orders, not order); a column or alias that is a keyword must be in double quotes (\"order\").",
+    "rule": "names that are keywords (order, group, key) must be in double quotes",
+    "example_bad": "SELECT * FROM order",
+    "example_fix": "SELECT * FROM orders",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "ambiguous-column",
+    "match": "ambiguous column name",
+    "hint": "That column exists in more than one joined table. Qualify it with the table alias, e.g. o.store_id instead of store_id.",
+    "rule": "after a JOIN, qualify shared column names with the table alias",
+    "example_bad": "SELECT store_id FROM orders o JOIN stores s ON s.store_id = o.store_id",
+    "example_fix": "SELECT o.store_id FROM orders o JOIN stores s ON s.store_id = o.store_id",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "subselect-columns",
+    "match": "sub-select returns \\d+ columns - expected 1",
+    "hint": "A subquery used with IN or = must select exactly one column.",
+    "rule": "a subquery inside IN (...) selects exactly one column",
+    "example_bad": "WHERE customer_id IN (SELECT customer_id, city FROM customers)",
+    "example_fix": "WHERE customer_id IN (SELECT customer_id FROM customers)",
+    "added": "2026-11-02"
+  },
+  {
+    "id": "wrong-argument-count",
+    "match": "wrong number of arguments to function",
+    "hint": "That function was called with the wrong number of arguments for SQLite. Check its SQLite form, e.g. ROUND(x, digits), substr(text, start, length), strftime(format, date).",
+    "rule": "use SQLite's argument order: ROUND(x, digits), substr(text, start, length), strftime(format, date)",
+    "example_bad": "ROUND()",
+    "example_fix": "ROUND(amount, 2)",
+    "added": "2026-11-02"
+  }
+]
