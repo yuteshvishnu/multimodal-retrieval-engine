@@ -5,19 +5,29 @@ from datetime import datetime
 from typing import List, Optional
 
 from backend.config import (
-    MAX_CLARIFY_ROUNDS, MAX_ESTIMATED_READS, MAX_LLM_CALLS_PER_QUESTION, MAX_RESULT_ROWS, PAGE_SIZE,
+    ANSWER_CACHE_SIZE, MAX_CLARIFY_ROUNDS, MAX_STEP_ROUNDS, MAX_ESTIMATED_READS, MAX_LLM_CALLS_PER_QUESTION, MAX_RESULT_ROWS, PAGE_SIZE,
     QUERY_TIMEOUT_SECONDS, RESULT_CACHE_SIZE, SQL_CALLS_PER_ROUND, SQL_TEMPERATURE,
 )
+from backend.rag.encoders.text_encoder import get_text_encoder
+from backend.text_to_sql.answer_cache import AnswerCache
 from backend.text_to_sql.checks import (
-    check_result, check_sql, date_ranges, describe_rows, explain_disagreement, question_problems, result_signature,
+    check_result, check_sql, date_ranges, describe_rows, explain_disagreement, question_problems,
+    result_signature, tables_in_sql,
 )
 from backend.text_to_sql.database import QueryTimeout, SQLiteDatabase
 from backend.text_to_sql.results import ResultCache
 from backend.text_to_sql.sql_errors import ErrorBook, normalize
-from backend.text_to_sql.interpreter import QuestionInterpreter
+from backend.text_to_sql.wording import plain_words, schema_names
+from backend.text_to_sql.interpreter import MAX_OPTIONS, QuestionInterpreter
+from backend.text_to_sql.planner import StepPlanner
 from backend.text_to_sql.safety import write_message, write_problems, write_request
 from backend.text_to_sql.schema_index import SchemaIndex
 from backend.text_to_sql.sql_generator import CallBudget, CallLimitReached, SQLGenerator
+
+def meaning_text(option: dict) -> str:
+    """A meaning with its choices, as the UI sends it once confirmed."""
+    return "\n".join([option["meaning"]] + [f"- {c}" for c in option["choices"]])
+
 
 # how many tables the embedding search picks (bridge tables are added on top)
 TOP_K_TABLES = 4
@@ -45,6 +55,7 @@ class TextToSQLPipeline:
     def __init__(self, use_retrieval: bool = True, top_k: int = TOP_K_TABLES):
         self.generator = SQLGenerator()
         self.interpreter = QuestionInterpreter()
+        self.planner = StepPlanner()  # Version-10: the steps the user checks
         # Version-9: SQLite errors already seen: rules for the prompt, hints for retries
         self.errors = ErrorBook()
         self.generator.rules = self.errors.rules
@@ -52,6 +63,8 @@ class TextToSQLPipeline:
         self.use_retrieval = use_retrieval
         self._reload_lock = threading.Lock()
         self.results = ResultCache(RESULT_CACHE_SIZE)  # Version-8: recent results, for paging
+        # Version-12: recent answers, reused when the same question comes back in other words
+        self.answers = AnswerCache(ANSWER_CACHE_SIZE, lambda text: get_text_encoder().encode(text))
         self.reload()
 
     def reload(self) -> None:
@@ -67,6 +80,8 @@ class TextToSQLPipeline:
             index = SchemaIndex(tables) if self.use_retrieval and tables else None
             self.database, self.tables, self.index = database, tables, index
             self.row_counts = {t["name"].lower(): t["row_count"] for t in tables}
+            # a table, its description or a database changed: saved SQL may no longer fit
+            self.answers.clear()
 
     def find_table(self, database: str, name: str) -> Optional[dict]:
         return next((t for t in self.tables if t["database"] == database and t["name"] == name), None)
@@ -76,7 +91,10 @@ class TextToSQLPipeline:
             return self.tables
         return self.index.retrieve(query_text, self.top_k)
 
-    def interpret(self, query_text: str, history: Optional[List[dict]] = None, previous: Optional[dict] = None) -> dict:
+    def interpret(
+        self, query_text: str, history: Optional[List[dict]] = None, previous: Optional[dict] = None,
+        question_id: Optional[str] = None,
+    ) -> dict:
         """
         Up to 3 meanings of the question for the user to pick from.
         history: earlier sets of options the user rejected, each {"options": [...], "comment": "..."}.
@@ -98,10 +116,30 @@ class TextToSQLPipeline:
             }
 
         tables, schema, context, _ = self._prepare(query_text, previous)
+        # Version-12: the same question asked before (in any words): its meaning goes first
+        saved = self.answers.match(query_text) if not history and not previous else None
         try:
-            options = self.interpreter.options(query_text, schema, context, history)
+            options = self.interpreter.options(
+                query_text, schema, context, history,
+                tag={"question_id": question_id, "stage": "meaning", "round": len(history) + 1},
+                known=saved["meaning"] if saved else "",
+            )
         except Exception as e:
             return {"error": f"Could not understand the question: {e}", "llm_calls": 1}
+
+        # what the user reads: everyday words, never database names (order_date -> order date)
+        names = schema_names(self.tables)
+        for option in options:
+            option["meaning"] = plain_words(option["meaning"], names)
+            option["choices"] = [plain_words(c, names) for c in option["choices"]]
+
+        if saved:
+            first, *choices = saved["meaning"].split("\n")
+            reuse = {"meaning": first, "choices": [c.removeprefix("- ") for c in choices], "changes_data": False,
+                     "reuse_id": saved["id"]}
+            # drop any option that only rewords the saved meaning
+            others = [o for o in options if not self.answers.repeats(saved["meaning"], meaning_text(o))]
+            options = [reuse] + others[: MAX_OPTIONS - 1]
 
         # safety, after the LLM read the question: any meaning that would change data
         for option in options:
@@ -119,7 +157,50 @@ class TextToSQLPipeline:
             "llm_calls": 1,
         }
 
-    def run(self, query_text: str, meaning: str = "", previous: Optional[dict] = None) -> dict:
+    def plan(
+        self, query_text: str, meaning: str, previous: Optional[dict] = None, question_id: Optional[str] = None,
+        history: Optional[List[dict]] = None,
+    ) -> dict:
+        """
+        Version-10: the steps for the confirmed meaning, for the user to check (1 LLM call).
+        history: earlier tries with the user's comments on wrong steps; only this step re-runs.
+        """
+        history = history or []
+        error = self._question_error(query_text)
+        if error:
+            return {"error": error, "llm_calls": 0}
+        for text, where in ((query_text, "This question"), (meaning, "The confirmed meaning")):
+            reason = write_request(text) if text else None
+            if reason:
+                return self._blocked(write_message(reason, where), llm_calls=0)
+        if len(history) >= MAX_STEP_ROUNDS:
+            return {
+                "error": f"The steps still aren't right after {MAX_STEP_ROUNDS} tries. Please rephrase the question.",
+                "llm_calls": 0,
+            }
+
+        tables, schema, context, _ = self._prepare(query_text, previous)
+        try:
+            steps = self.planner.steps(
+                query_text, meaning, schema, context, history,
+                tag={"question_id": question_id, "stage": "steps", "round": len(history) + 1},
+            )
+        except Exception as e:
+            return {"error": f"Could not work out the steps: {e}", "llm_calls": 1}
+        names = schema_names(self.tables)
+        return {
+            # everyday words, never database names
+            "steps": [plain_words(step, names) for step in steps],
+            "round": len(history) + 1,
+            "max_rounds": MAX_STEP_ROUNDS,
+            "tables": [table["name"] for table in tables],
+            "llm_calls": 1,
+        }
+
+    def run(
+        self, query_text: str, meaning: str = "", previous: Optional[dict] = None, question_id: Optional[str] = None,
+        steps: Optional[List[str]] = None,
+    ) -> dict:
         error = self._question_error(query_text)
         if error:
             return {"error": error, "llm_calls": 0}
@@ -145,7 +226,8 @@ class TextToSQLPipeline:
             with ThreadPoolExecutor(max_workers=calls) as pool:
                 futures = [
                     pool.submit(
-                        self._attempt, query_text, meaning, schema, context, feedback, budget, tables, now, round_no
+                        self._attempt, query_text, meaning, schema, context, feedback, budget, tables, now, round_no,
+                        {"question_id": question_id, "stage": "sql", "round": round_no}, steps,
                     )
                     for _ in range(calls)
                 ]
@@ -253,11 +335,17 @@ class TextToSQLPipeline:
 
         # Version-8: keep the result on the server; the UI gets page 1 and asks for the rest
         result_id = self.results.put(chosen["sql"], chosen["columns"], chosen["rows"], chosen["more"])
+        # Version-12: saved for reuse (unless it's a follow-up, which depends on the earlier answer)
+        if not (previous or {}).get("question"):
+            self.answers.add(query_text, meaning, steps or [], chosen["sql"], question_id, confidence)
 
         return {
             "sql": chosen["sql"],
             "meaning": meaning or None,
-            "tables": table_names,
+            "steps": steps or [],
+            # the tables the answer really used, read from its SQL (not every table offered to the LLM)
+            "tables": tables_in_sql(chosen["sql"], [t["name"] for t in self.tables]) or table_names,
+            "tables_offered": table_names,
             "columns": chosen["columns"],
             "rows": chosen["rows"][:PAGE_SIZE],
             "row_count": len(chosen["rows"]),
@@ -269,6 +357,39 @@ class TextToSQLPipeline:
             "llm_calls": budget.used,
             "attempts": summary,
             "feedback": "\n\n".join(f for f in feedback_sent if f),
+        }
+
+    def reuse(self, entry_id: str, question_id: Optional[str] = None) -> dict:
+        """
+        Version-12: answers from a saved answer the user picked as the meaning. Its SQL runs
+        again (fresh rows, same safety and time checks), with no LLM calls. If it's gone or
+        no longer runs, {"fallback": True}: the usual steps and SQL take over.
+        """
+        entry = self.answers.get(entry_id)
+        if entry is None or write_problems(entry["sql"]):
+            return {"fallback": True, "llm_calls": 0}
+        try:
+            columns, rows, more = self.database.query(entry["sql"])
+        except Exception:
+            return {"fallback": True, "llm_calls": 0}
+        self.answers.link(entry_id, question_id)
+        result_id = self.results.put(entry["sql"], columns, rows, more)
+        warnings = [f"Showing the first {MAX_RESULT_ROWS} rows; there are more. Narrow the question to see everything."] if more else []
+        return {
+            "sql": entry["sql"],
+            "meaning": entry["meaning"],
+            "steps": entry["steps"],
+            "tables": tables_in_sql(entry["sql"], [t["name"] for t in self.tables]),
+            "columns": columns,
+            "rows": rows[:PAGE_SIZE],
+            "row_count": len(rows),
+            "more": more,
+            "page_size": PAGE_SIZE,
+            "result_id": result_id,
+            "confidence": entry["confidence"],
+            "warnings": warnings,
+            "llm_calls": 0,
+            "reused": True,
         }
 
     @staticmethod
@@ -362,13 +483,15 @@ class TextToSQLPipeline:
             )
         return tables, schema, context, now
 
-    def _attempt(self, question, meaning, schema, context, feedback, budget, tables, now, round_no) -> dict:
+    def _attempt(
+        self, question, meaning, schema, context, feedback, budget, tables, now, round_no, tag=None, steps=None
+    ) -> dict:
         """One LLM call, then the before-run checks, then run it."""
         attempt = {"round": round_no, "sql": None, "status": "failed", "problems": [], "warnings": []}
         try:
             attempt["sql"] = self.generator.generate(
                 question, schema, budget, context=context, feedback=feedback, meaning=meaning,
-                temperature=SQL_TEMPERATURE,
+                temperature=SQL_TEMPERATURE, tag=tag, steps=steps,
             )
         except CallLimitReached as e:
             attempt["problems"] = [str(e)]

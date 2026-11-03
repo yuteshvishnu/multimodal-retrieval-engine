@@ -18,6 +18,7 @@ const ICONS = {
   chevron: <path d="m9 6 6 6-6 6" />,
   sliders: <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M14 4v4M8 10v4M16 16v4" />,
   arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
+  chart: <><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></>,
   refresh: <><path d="M20 12a8 8 0 1 1-2.3-5.7" /><path d="M20 4v5h-5" /></>,
   trash: <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />,
   clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
@@ -29,6 +30,10 @@ const ICONS = {
   sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
   moon: <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />,
   monitor: <><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>,
+  flag: <path d="M5 21V4M5 4h11l-2 4 2 4H5" />,
+  agent: <><rect x="4" y="8" width="16" height="12" rx="3" /><path d="M12 4v4M9 13v1.5M15 13v1.5M9.5 17.5h5M2 13v3M22 13v3" /><circle cx="12" cy="3" r="1" /></>,
+  x: <path d="M6 6l12 12M18 6 6 18" />,
+  arch: <><rect x="3" y="3" width="7" height="5" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="8.5" y="16" width="7" height="5" rx="1" /><path d="M6.5 8v3.5h11V8M12 11.5V16" /></>,
 };
 
 export function Icon({ name, size = 16 }) {
@@ -137,9 +142,10 @@ export function SqlCode({ sql, className = "code" }) {
   );
 }
 
-// Previous / page x of y / next. Renders nothing when everything fits on one page.
-export function Pagination({ page, pages, total, label = "rows", onPage }) {
-  if (pages <= 1) return null;
+// Previous / page x of y / next. Renders nothing when everything fits on one page, unless
+// `always` (then the buttons are just disabled).
+export function Pagination({ page, pages, total, label = "rows", onPage, always = false }) {
+  if (pages <= 1 && !always) return null;
   return (
     <div className="pagination">
       <span className="muted">

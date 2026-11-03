@@ -7,6 +7,8 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from backend.config import APP_PASSWORD
+from backend.dashboard_api import router as dashboard_router
+from backend.issues_api import router as issues_router
 from backend.rag.api import router as rag_router
 from backend.text_to_sql.api import router as sql_router
 
@@ -32,9 +34,11 @@ async def require_password(request: Request, call_next):
         return Response("Sign in to use Rexie.", status_code=401, headers={"WWW-Authenticate": 'Basic realm="Rexie"'})
     return await call_next(request)
 
-# RAG: /api/rag/...   Text-to-SQL: /api/sql/...
+# RAG: /api/rag/...   Text-to-SQL: /api/sql/...   Dashboard: /api/usage/...   Issues + agent: /api/issues/...
 app.include_router(rag_router)
 app.include_router(sql_router)
+app.include_router(dashboard_router)
+app.include_router(issues_router)
 
 
 @app.get("/api/health")

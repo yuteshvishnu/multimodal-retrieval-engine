@@ -2,11 +2,18 @@ import { useEffect, useState } from "react";
 import { Icon } from "./components/ui.jsx";
 import ScoutTab from "./tabs/ScoutTab.jsx";
 import ScribeTab from "./tabs/ScribeTab.jsx";
+import DashboardTab from "./tabs/DashboardTab.jsx";
+import ArchitectureTab from "./tabs/ArchitectureTab.jsx";
+
+// Scribe (RAG) is hidden for now; set to true to bring its tab back
+const SHOW_SCRIBE = false;
 
 // Rexie's two products
 const TABS = [
-  { id: "rag", label: "Scribe", hint: "Rexie Scribe: ask your documents (RAG)", icon: "doc" },
+  { id: "rag", label: "Scribe", hint: "Rexie Scribe: ask your documents (RAG)", icon: "doc", hidden: !SHOW_SCRIBE },
   { id: "sql", label: "Scout", hint: "Rexie Scout: ask your data (Text-to-SQL)", icon: "database" },
+  { id: "dashboard", label: "Dashboard", hint: "LLM calls, tokens, time and cost of every question", icon: "chart" },
+  { id: "architecture", label: "Architecture", hint: "How Scout is built, and what each version changed", icon: "arch" },
 ];
 
 const THEMES = [
@@ -24,7 +31,7 @@ function savedTheme() {
 }
 
 export default function App() {
-  const [active, setActive] = useState("rag");
+  const [active, setActive] = useState(SHOW_SCRIBE ? "rag" : "sql");
   const [theme, setTheme] = useState(savedTheme);
 
   // "system" follows the OS setting; light/dark override it (see styles.css)
@@ -51,7 +58,7 @@ export default function App() {
 
           <div className="topbar-actions">
             <nav className="tabs">
-              {TABS.map((tab) => (
+              {TABS.filter((tab) => !tab.hidden).map((tab) => (
                 <button
                   key={tab.id}
                   className={tab.id === active ? "tab active" : "tab"}
@@ -84,11 +91,19 @@ export default function App() {
 
       <main className="page">
         {/* both stay mounted, so switching tabs keeps each tab's results */}
-        <div hidden={active !== "rag"}>
-          <ScribeTab />
-        </div>
+        {SHOW_SCRIBE && (
+          <div hidden={active !== "rag"}>
+            <ScribeTab />
+          </div>
+        )}
         <div hidden={active !== "sql"}>
           <ScoutTab />
+        </div>
+        <div hidden={active !== "dashboard"}>
+          <DashboardTab active={active === "dashboard"} />
+        </div>
+        <div hidden={active !== "architecture"}>
+          <ArchitectureTab />
         </div>
       </main>
     </>

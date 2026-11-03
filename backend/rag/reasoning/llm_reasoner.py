@@ -1,6 +1,6 @@
 import os
 from typing import List, Dict, Tuple
-from backend.llm import make_client
+from backend.llm import chat, make_client
 
 from backend.config import GROQ_API_KEY, GROQ_MODEL_RAG
 
@@ -39,17 +39,18 @@ class LLMReasoner:
         self,
         query_text: str,
         retrieved_chunks: List[Dict],
+        tag: Dict | None = None,
     ) -> Tuple[str, str]:
         if not retrieved_chunks:
             return ("I couldn't find any relevant documents.", "No chunks available.")
 
         try:
-            return self._answer_with_cloud(query_text, retrieved_chunks)
+            return self._answer_with_cloud(query_text, retrieved_chunks, tag)
         except Exception as e:
             print(f"[LLMReasoner] Cloud failed: {e}. Falling back to rules.")
             return self._answer_with_bullets(query_text, retrieved_chunks)
 
-    def _answer_with_cloud(self, query, chunks) -> Tuple[str, str]:
+    def _answer_with_cloud(self, query, chunks, tag=None) -> Tuple[str, str]:
         if self.client is None:
             raise RuntimeError("GROQ_API_KEY is not set")
         # the whole chunk, not the short snippet shown in the UI, fenced off as data
@@ -57,7 +58,9 @@ class LLMReasoner:
             f"[{c['id']}] {fence(c.get('text', c['snippet']))}" for c in chunks[:5]
         )
 
-        completion = self.client.chat.completions.create(
+        completion = chat(
+            self.client,
+            tag,
             model=self.model_name,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},

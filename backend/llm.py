@@ -6,7 +6,8 @@ has the same time limit and retries.
     max_retries   rate limits (429), server errors (5xx), timeouts and dropped connections are
                   retried with exponential backoff, honouring Groq's "try again in Xs" hint
 """
-from typing import Optional
+import time
+from typing import Dict, Optional
 
 from openai import OpenAI
 
@@ -23,3 +24,21 @@ def make_client(api_key: str = GROQ_API_KEY) -> Optional[OpenAI]:
         timeout=LLM_TIMEOUT_SECONDS,
         max_retries=LLM_MAX_RETRIES,
     )
+
+
+def chat(client: OpenAI, tag: Optional[Dict] = None, **kwargs):
+    """
+    client.chat.completions.create, recorded for the Dashboard: tokens (from the API's own
+    count), time and price, tagged with the question and the job it did:
+        tag = {"question_id": ..., "stage": "meaning" | "sql" | "answer" | "table_description", "round": n}
+    """
+    from backend.usage import usage_store  # here, so tests can swap the store
+
+    start = time.monotonic()
+    try:
+        completion = client.chat.completions.create(**kwargs)
+    except Exception:
+        usage_store.record_call(tag, kwargs.get("model", ""), None, time.monotonic() - start, "error")
+        raise
+    usage_store.record_call(tag, kwargs.get("model", ""), completion.usage, time.monotonic() - start, "ok")
+    return completion

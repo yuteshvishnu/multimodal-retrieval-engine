@@ -1,7 +1,8 @@
 import re
 import threading
+from typing import List, Optional
 
-from backend.llm import make_client
+from backend.llm import chat, make_client
 
 from backend.config import GROQ_API_KEY, GROQ_MODEL_SQL
 
@@ -64,6 +65,8 @@ class SQLGenerator:
         feedback: str = "",
         meaning: str = "",
         temperature: float = 0,
+        tag: Optional[dict] = None,
+        steps: Optional[List[str]] = None,
     ) -> str:
         if not self.api_key:
             raise RuntimeError("GROQ_API_KEY is not set.")
@@ -80,10 +83,16 @@ class SQLGenerator:
         prompt += f"Question: {question}"
         if meaning:
             prompt += f"\n\nWhat the user means (confirmed by the user):\n{meaning}"
+        if steps:
+            prompt += "\n\nSteps confirmed by the user (the SQL must do exactly these):\n" + "\n".join(
+                f"{n}. {step}" for n, step in enumerate(steps, 1)
+            )
         if feedback:
             prompt += f"\n\nEarlier attempts had these problems; avoid them:\n{feedback}"
 
-        completion = self.client.chat.completions.create(
+        completion = chat(
+            self.client,
+            tag,
             model=self.model_name,
             messages=[
                 {"role": "system", "content": self._system_prompt()},

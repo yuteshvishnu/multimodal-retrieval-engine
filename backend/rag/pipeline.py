@@ -28,6 +28,7 @@ class RAGPipeline:
         query_text: str | None,
         sources: list[str] | None = None,
         collections: list[str] | None = None,
+        question_id: str | None = None,
     ) -> dict:
         """
         Main entry point:
@@ -71,6 +72,7 @@ class RAGPipeline:
         answer, reasoning_summary = self.reasoner.answer(
             query_text=query_text,
             retrieved_chunks=retrieved,
+            tag={"question_id": question_id, "stage": "answer", "round": 1},
         )
 
         # --- UPDATED DEVICE LOGGING ---

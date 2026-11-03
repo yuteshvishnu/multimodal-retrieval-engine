@@ -6,8 +6,12 @@ Rexie answers questions **only from our own data**. It's one app with two produc
 
 | Product | Answers from | How | Status |
 |---|---|---|---|
-| **Product-1: Rexie Scribe** (RAG, Retrieval-Augmented Generation) | Your documents (PDF, Word, Markdown, text) | Finds the relevant passages in the documents you pick, writes an answer and cites them | Complete |
+| **Product-1: Rexie Scribe** (RAG, Retrieval-Augmented Generation) | Your documents (PDF, Word, Markdown, text) | Finds the relevant passages in the documents you pick, writes an answer and cites them | Complete, **hidden for now** |
 | **Product-2: Rexie Scout** (Text-to-SQL) | SQLite databases | Confirms what you mean, writes SQL, checks it, runs it and shows the result | In progress |
+
+**Scribe is hidden for now:** the app shows **Scout**, **Dashboard** and **Architecture**, and opens on Scout. Its code and API are unchanged; set `SHOW_SCRIBE = true` in `frontend/src/App.jsx` to bring the tab back. The Dashboard's question list no longer shows a Scout / Scribe tag on each row.
+
+**Architecture tab:** how Scout is built, in the app itself: a block diagram of today's design (UI, API, the six pipeline stages, the services and data they use, the issues and the Failure Analyst), each block tagged with the version that added it; a Version-1 diagram for contrast; then every version as *Problem → What we thought → What we added*, with its measured result, and what's still open. Static content in `frontend/src/tabs/ArchitectureTab.jsx`.
 
 ## Contents
 
@@ -27,7 +31,11 @@ Rexie answers questions **only from our own data**. It's one app with two produc
   - [Version-7: Safety (Read-Only)](#version-7-safety-read-only)
   - [Version-8: Performance (Heavy Queries)](#version-8-performance-heavy-queries)
   - [Version-9: Error Book (Learning from SQL Errors)](#version-9-error-book-learning-from-sql-errors)
+  - [Version-10: Check the Steps, Rate the Answer](#version-10-check-the-steps-rate-the-answer)
+  - [Version-11: Failure Analyst (an AI Agent)](#version-11-failure-analyst-an-ai-agent)
+  - [Version-12: Reuse Recent Answers](#version-12-reuse-recent-answers)
 - [The App (UI)](#the-app-ui)
+- [Dashboard (LLM Usage and Cost)](#dashboard-llm-usage-and-cost)
 - [Fixes](#fixes)
 - [Known Issues](#known-issues)
 - [Models](#models)
@@ -48,7 +56,14 @@ multimodal-retrieval-engine/
 ├── backend/
 │   ├── main.py              # one FastAPI server for both products + serves the React app (+ optional password)
 │   ├── config.py            # all API keys (read from .env), model names and limits
-│   ├── llm.py               # the one LLM client: time limit + retries for every call
+│   ├── llm.py               # the one LLM client: time limit + retries; chat() records every call
+│   ├── usage.py             # Dashboard: every LLM call per question (tokens, time, cost) in SQLite
+│   ├── dashboard_api.py     #   /api/usage/... (summary, timeline, questions)
+│   ├── issues_api.py        #   Version-11: /api/issues/... (issues, start the agent, approve / reject)
+│   ├── agent/               # Version-11: the Failure Analyst (an AI agent)
+│   │   ├── tools.py         #   its read-only tools (tables, column values, test queries, error book)
+│   │   ├── analyst.py       #   the agent loop: LLM → tool → result → ... → report
+│   │   └── fixes.py         #   code tests the suggested fix, and applies it once approved
 │   ├── rag/                 # Rexie Scribe (RAG)
 │   │   ├── api.py           #   /api/rag/... (query, feedback, documents)
 │   │   ├── documents.py     #   Version-2: list and upload documents (.txt .md .pdf .docx)
@@ -67,13 +82,16 @@ multimodal-retrieval-engine/
 │       ├── table_summaries.py # Version-3: LLM-written table summaries; Version-6: rewrites from corrections
 │       ├── checks.py        #   Version-4: deterministic checks before and after running SQL
 │       ├── interpreter.py   #   Version-5: up to 3 meanings of the question for the user to pick
+│       ├── planner.py       #   Version-10: the steps the user checks (re-run from their comments)
+│       ├── wording.py       #   Version-10: everyday words in what the user reads
 │       ├── safety.py        #   Version-7: blocks anything that could change a database
 │       ├── results.py       #   Version-8: recent results kept for paging (LRU cache)
+│       ├── answer_cache.py  #   Version-12: recent answers, reused for the same question in other words
 │       ├── sql_errors.py    #   Version-9: the error book (known SQLite errors, hints, log)
 │       └── catalog.py       #   Version-6: table list (10 per page), adding a .sqlite database
 ├── frontend/                # React app (Vite)
 │   └── src/
-│       ├── tabs/            #   ScribeTab = RagTab (Ask) + SourcesTab (Sources); ScoutTab = SqlTab (Ask) + TablesTab (Tables)
+│       ├── tabs/            #   ScribeTab = RagTab (Ask) + SourcesTab (Sources); ScoutTab = SqlTab (Ask) + TablesTab (Tables); DashboardTab = Usage + IssuesView (Issues); ArchitectureTab = design diagrams + every version
 │       ├── components/ui.jsx #  icons, loading, alerts, SQL highlighting, pager, data table
 │       └── styles.css       #   design tokens (light + dark), layout
 ├── data/
@@ -357,6 +375,7 @@ Each version fixed a problem the previous one exposed.
 | **Version-7:** Safety | A question or the LLM's SQL could change the database | Deterministic write checks on the question, the meaning and the SQL |
 | **Version-8:** Performance | A heavy query can be slow or return huge results | Size estimate before running, time limit, 200-row limit, paging from a cache |
 | **Version-9:** Error book | The model repeats SQL mistakes from other dialects, and retries can't fix them | Known SQLite errors → prompt rules + fix hints; log + report to grow it; early stop; clear failures |
+| **Version-10:** Steps and feedback | The user can't see or correct *how* an answer is built, and wrong answers leave no trace | The user checks the steps before the SQL is written; 👍 / 👎 on the answer, 👎 logged as an issue |
 
 ---
 
@@ -712,6 +731,123 @@ fails:   "Scout couldn't build a working query for this question: SQLite rejecte
 
 ---
 
+### Version-10: Check the Steps, Rate the Answer
+
+Confirming the meaning fixed *what* is asked. But the user still couldn't see *how* Scout would answer, and when an answer was wrong nothing was kept to fix it. Now the user checks the plan **before** any SQL is written, and rates the answer **after**.
+
+```
+Ask → Confirm meaning ──"None of these" + comment → re-runs only the meaning
+    → Check steps ─────── comment on any wrong step → "Re-run steps" re-runs only the steps
+    → Answer (SQL follows the confirmed steps; the steps are shown with it)
+    → 👍 / 👎  ── 👎 + comment → logged as an issue on that question in the Dashboard
+```
+
+**The steps** (`planner.py`, 1 LLM call per try): after the meaning is confirmed, the model writes 3–8 numbered plain-English steps: which data to start from, how it's linked, what's kept or left out, how it's grouped and counted, how it's sorted and what's shown. The user clicks any step that isn't right and says why; **Re-run steps** sends the earlier steps plus those comments, and only this step is redone (the meaning stays), up to 5 tries. **Steps look right: answer** sends the confirmed steps to the SQL step, which must do exactly those. The answer shows them under **How this was answered** (this fixes [Issue 3](#issue-3-the-answer-isnt-explained)).
+
+**Feedback:** under every answer, *Is this answer right?* 👍 / 👎. A 👎 needs a short comment and is saved with what the user saw (meaning, steps, SQL, first rows), so the developer can reproduce it. One rating per question (the latest counts). Scribe's 👍 / 👎 now also lands on the Dashboard.
+
+**On the Dashboard:** a **Feedback** tile (👍 / 👎 counts); each question shows its 👍 / 👎; a 👎 question opens to an **Issue reported** box (comment, meaning, steps, SQL, first rows); **👎 Only issues** filters the list to the developer's to-do list. Step re-runs show in *LLM calls per try* (*Steps, try 2*) and count as retries.
+
+**Plain words, guaranteed.** Users don't know the database, so the meaning options and the steps must never show names like `order_date` or `employee_id`. The prompts ask for everyday words, and `wording.py` makes sure of it deterministically: any real table or column name that slips through (snake_case, `table.column` or in backticks) is rewritten (*order_date → order date*, *employee_id → employee ID*); ordinary words and non-database names are left alone.
+
+**Blue name tags (tried, then removed).** For a while, unclear column names (`cust_seg_cd`) and table names were also shown in their exact form as small blue tags in the meaning options and the steps. They are now removed: the options and steps are plain words only. Older Dashboard records that still carry the tag markers are shown as plain text.
+
+**Tables used = the tables the SQL really used.** The answer's *Tables used* used to list every table the search offered the LLM (5 for a one-table question). It now comes from the final SQL, read with the parser (real tables only, not `WITH` step names; subqueries count). *"How many orders placed in March 2026 got cancelled?"* → `orders` only. (The offered tables are still returned, as `tables_offered`.) Real check: two questions likely to pull in names (*average unit price per category*, *orders per employee by order status*): 6 options, their choices and 7 steps, **no database names left**.
+
+**A cleaner Ask view.** "All attempts" (every SQL try and why it was rejected) is gone from Scout's Ask view, for answers and failures alike: it was developer detail. A failure shows only its plain-English message; what each question took (calls per step, retries, cost) is on the Dashboard.
+
+**Safety note:** the steps aren't run through the write-request check, because normal steps read like "Remove cancelled orders from the list" (= leave them out). That's safe: the SQL check still lets only one plain read query run, whatever the steps say.
+
+**Tested:** 10 new tests (database names turned into plain words, brackets left as written; tables used read from the SQL; steps parsed and numbers stripped; comments on wrong steps sent in the re-run; plan then SQL with the steps in its prompt; 5-try limit; feedback counts, latest rating wins, 👎 filter and details; a 👎 without a comment refused; an empty question not recorded); all 102 pass. Real run on #20: meaning confirmed → 7 steps (step 6: *"include ties"*) → flagged step 7 (*"show the store name and the employee's full name, plus how many orders"*) → re-run changed **only step 7**, steps 1–6 kept word for word → answer: **all 16 rows correct, ties kept, high confidence**, columns exactly as step 7 said → 👍. Dashboard: *Meaning, try 1 · Steps, try 1 · Steps, try 2 · SQL, round 1: 3*, 1 retry, $0.003, 👍.
+
+### Version-11: Failure Analyst (an AI Agent)
+
+**Workflow vs agent.** Everything above is a **workflow**: our code decides every step, and the LLM only fills in text (meanings, steps, SQL). An **agent** is different: the LLM decides the steps itself, by calling tools in a loop. Our flow already covers what an agent would do while *answering* (schema, descriptions, checks, error book, size estimate), so an agent doesn't belong there. It does fit *after* a failure, where every case is different and someone has to dig in. Version-11 adds that agent: the **Failure Analyst**.
+
+**What it reads: the logs.** Every Scout failure is now saved as an **issue** on the Dashboard, tagged by where it came from:
+
+| Source | When it's logged | What we know |
+|---|---|---|
+| `Eval` | `evaluate.py` gets a test question wrong | question, Scout's SQL and rows, **the correct SQL and rows** |
+| `User report` | a user clicks **Report issue** and says what's wrong | question, comment, meaning, steps, SQL, first rows |
+| `SQL error` | SQLite rejects every SQL try | question, every try and its error |
+
+The same failure again (same source and question) updates its issue instead of adding a copy.
+
+**How it reasons (the agent loop).** The developer clicks **Investigate** (or **Investigate all new**, at most 5 at a time). Then:
+
+```
+read the failure → LLM picks a tool → our code runs it (read-only) → LLM reads the result
+→ picks the next tool … → submit_report → our code tests the fix
+                                           └ failed? sent back to the agent once to look again
+```
+
+| Tool | What it does |
+|---|---|
+| `list_tables` / `describe_table` | the tables, their columns and descriptions |
+| `column_values` | a column's most common values (spellings, case, date formats, units) |
+| `run_query` | one small read query, to test an idea or a corrected query |
+| `known_errors` | the error book's rules |
+
+**Our code keeps control** (the harness, `backend/agent/`):
+- **Read-only by design:** no tool can write. `run_query` passes the same checks as Scout's SQL (allow-list, size estimate, 5 s limit, read-only connection), and the agent sees at most 20 rows.
+- **A budget:** at most 8 tool calls per issue; after that, only *submit_report* is offered.
+- **A required report:** what happened · why · root cause · fix type · fix · **a corrected query** (it must run one first). An incomplete report is sent back.
+- **Code tests the fix, not the LLM:** the corrected query runs, and for an eval issue it must give the **same rows as the correct answer**. An error-book entry must be new, a valid pattern, and match the logged SQLite error. A fix that fails the test goes back to the agent **once**.
+- **You decide:** every report has a **fix type**, shown as a tag on the issue, and the type decides what **Approve** does. Above the buttons, a *When you approve* box says it in plain words for that issue:
+
+  | Fix type | What Approve does |
+  |---|---|
+  | **Error book** | Adds the entry to `sql_errors.json`. From the next question its rule goes into the SQL prompt, and its hint is given when SQLite shows that error. |
+  | **Table description** | Adds the note to the table's description and re-embeds it. |
+  | **Prompt change** / **Code change** | Changes nothing in Scout: marks the issue Approved as a to-do for the developer. |
+  | **No fix** | Changes nothing: closes the issue. |
+
+  **Reject** changes nothing and keeps your note. (Pages are now up to 1720px wide, from 1080px, so wide screens have less empty space on the sides.) Every LLM call is priced on the Dashboard (stage `agent`), and per issue.
+
+**Where you see it:** Dashboard → **Issues**. An intro explains the agent; the list filters by source and status (*Not investigated → Investigating… → Report ready → Approved / Rejected*). Each issue shows two tags: its **source** (Eval / User report / SQL error, filled) and, once investigated, its **fix type** (outlined). The report also says **where it broke** (meaning, steps, SQL, data, table description, tables picked). Opening an issue shows **the failure**, **how the agent worked** (its thinking, each tool call and result, live while it runs), **its report** with the test result, and **Approve / Reject** with a note.
+
+**Also:** 👍 / 👎 is now **Correct** / **Report issue** (Scout and Scribe), and the Dashboard shows ✓ / ⚑. Scribe's reports show on the Dashboard but aren't investigated: the agent's tools are for databases.
+
+**Model:** `AGENT_MODEL` in `config.py` (now `openai/gpt-oss-120b`, which supports tool calling). It runs only on failures, so a stronger model can be tried here without raising the cost of normal questions.
+
+**Real run on #20** (*"For each store, which employee handled the most orders?"*; Scout returned 15 rows, the correct answer has 16):
+1. First try: the agent found the tie problem (`ROW_NUMBER` drops tied employees) but suggested an **error-book entry**, which only reacts to SQLite errors, and this query ran fine. That's now caught by code: *"No SQLite error was logged, so an error-book entry would never match."*
+2. Second try: fix type *prompt*, corrected SQL with `RANK()`, but our test said **15 rows, 16 expected**.
+3. With the test sent back, the agent looked again and found the **second cause**: the steps had added *"leave out cancelled orders"*, which the question never asked for (the open issue from Version-5). Its new query matched the correct answer exactly: **16/16 rows, test passed**, in **5 LLM calls, $0.003**.
+
+**Tested:** 11 new tests with a stand-in LLM (no API key): one issue per failure; one investigation at a time and none stuck after a restart; tools refuse writes, multiple statements and unknown tables; the loop records each step, prices each call and tests the fix; only the report is offered once tool calls run out; a failed test goes back once; a broken run is marked *Agent stopped*; error-book fixes are checked and applied (on a copy); a report needs a corrected query; a user report becomes an issue. All 113 pass. Checked in the browser in light, dark and phone sizes.
+
+### Version-12: Reuse Recent Answers
+
+**Problem:** the same question often comes back in other words ("How many orders in March 2026?", then "count the orders from march 2026"). Each time, Scout wrote the steps and the SQL again: 4 to 7 LLM calls and 10 to 20 seconds for an answer it already had.
+
+**What we built:** the 10 most recent answers are saved (question, confirmed meaning, steps, SQL). When a new question is close to a saved one, its meaning is shown as the **first option**; the LLM writes up to 2 other meanings next to it. If the user picks the first option, Scout **runs the saved SQL again** (fresh rows, the usual safety and time checks, **no LLM calls**) and shows the answer with its steps. Picking any other option runs the normal flow. Nothing on screen says the answer was reused; the Dashboard marks the question *answered (reused)*.
+
+**When two questions are "close":** decided by code, and all three must hold:
+
+| Check | Why |
+|---|---|
+| Embeddings similar (cosine ≥ 0.80) | Same meaning in other words |
+| Key words overlap (≥ 50% of the shorter question's words, plurals folded) | Both talk about the same things |
+| No clash in numbers, months or scope | "March 2026" vs "April 2026" are **0.99** alike as embeddings, so code compares the numbers and months; "for each store" never matches "overall" |
+
+**What is saved, and for how long:**
+- Every answer, unless it's a **follow-up** (it depends on the earlier answer) or about a **moving time** ("today", "last week", "this month"), whose saved SQL would keep yesterday's dates. An answer nobody reports counts as right.
+- **Reported answers are removed** at once (also when the report is on a reused answer).
+- **Any table change** (description saved, database added or removed) clears everything.
+- 10 entries, least recently used dropped first; kept in server memory, so a restart empties it. If a saved answer is gone or its SQL no longer runs, Scout quietly writes the steps as usual.
+
+**No repeated options:** the LLM is told the saved meaning is already option 1, but in a real run it still wrote it again in other words (*"…no matter what its status is"* vs *"…regardless of its status"*). Code now drops any option that only rewords it: the meanings must be very close as embeddings (≥ 0.92) **and** use the same limiting words (*only, not, except, exclude, without*). Embeddings alone can't tell: *"only orders that are not cancelled"* is 0.94 alike yet means something else, and its *only / not* keeps it.
+
+**Feedback is now report-only:** the *Correct* button is gone (an answer nobody reports counts as right); the answer shows *Something wrong with this answer?* with **Report issue**. The Dashboard's tile shows reported answers.
+
+**Tested:** 7 new tests (real embedding model, stand-in LLM): rephrasings match; April, 2025, customers and "overall" don't; moving-time questions aren't saved; 10-entry limit and one copy per meaning; a report removes the saved answer it came from; the saved meaning is the first option with its choices and the LLM is told not to repeat it; reuse answers with 0 LLM calls and the saved steps; a missing entry falls back; a table change clears the cache; follow-ups aren't saved; reporting via the API stops reuse; a reworded repeat of the saved meaning is dropped while a narrower one is kept. All 121 pass.
+
+**Real run (6 LLM calls):** *"How many orders were placed in March 2026?"* → meaning, steps, answer: **3 orders**, high confidence, 5 calls, $0.0019. Then *"count the orders from march 2026"* → the saved meaning was option 1; picking it answered in **0.45 s with 0 SQL calls** (1 call in total, for the meanings), same 3 orders and steps, shown on the Dashboard as *answered (reused)*. That run found the repeated option, fixed above.
+
+---
+
 ## The App (UI)
 
 Both products share one React app, designed to look like a finished product instead of a demo:
@@ -725,10 +861,39 @@ Both products share one React app, designed to look like a finished product inst
 | Options as plain radio list | Selectable option cards, choices shown as tags |
 | One line of stats | Stat strip: rows, **confidence badge**, LLM calls, tables used |
 | Plain table | Sticky header, row numbers, numbers right-aligned, NULLs greyed out, 10 rows per page |
-| Plain SQL text | Syntax-coloured SQL with a **Copy** button; attempts in a collapsible list |
+| Plain SQL text | Syntax-coloured SQL with a **Copy** button (the list of attempts was later removed from the Ask view, Version-10) |
 | RAG citations as one line each | Citation cards with source, chunk id and a score bar; a **Search in** picker for documents |
 
 Also: a **theme switch** in the header (System / Light / Dark, remembered between visits) and a **phone layout** (no sideways scrolling). Checked in the browser in light, dark and phone sizes.
+
+---
+
+## Dashboard (LLM Usage and Cost)
+
+Every question costs LLM calls, and each call costs money by its **tokens**. Scout's retries (meaning re-asks, SQL round 2) multiply that. The **Dashboard** tab shows what each question actually cost, across both products.
+
+**What's recorded, per LLM call** (`backend/usage.py`, SQLite at `data/usage/usage.sqlite`, git-ignored): the question it belongs to, its **job** (`meaning`, `sql`, `answer`, `table_description`) and round, the model, **input / output / reasoning tokens** (the API's own count, not an estimate), its time, whether it failed, and the **price used** (saved with the call, so old costs stay right when prices change). Per question: when, which product, the outcome (answered, waiting for meaning, blocked, too heavy, failed) and the total processing time. Every call goes through one helper (`chat()` in `backend/llm.py`), so nothing is missed.
+
+**Cost of a call** = input tokens × input price + output tokens × output price (per million tokens, `LLM_PRICES` in `config.py`). The gpt-oss models **think before answering**: those reasoning tokens are billed as output but never shown. In a first real Scout question, 1,199 of 1,502 output tokens were reasoning.
+
+| Model | Input $ / 1M tokens | Output $ / 1M tokens |
+|---|---|---|
+| `openai/gpt-oss-120b` | 0.15 | 0.60 |
+| `openai/gpt-oss-20b` | 0.075 | 0.30 |
+
+*Prices as listed by third-party trackers on 2026-11-03 (Groq's own page doesn't show them to scripts); check your Groq console and update `config.py` if they differ.*
+
+**What the Dashboard shows**
+
+1. **Totals**: questions asked, input tokens, output tokens (incl. reasoning), and **total cost** of *all* LLM calls (incl. table-description calls, which aren't tied to a question).
+2. **LLM cost over time**, for a period you pick: **Day** (24 hourly bars, 00:00–24:00), **Week** (Mon–Sun), **Month** (every day of the month) or **Year** (12 months), with a date / month / year picker, **‹ ›** to step back and forward, and **Today**. The time axis is fixed for each period, so bars sit at their real time instead of being spread evenly. Hovering a bar shows that hour / day / month: its cost, number of calls, and the questions in it with their own cost. The tooltip is measured and always placed inside the chart. Bar colours checked for contrast in light and dark mode.
+3. **Questions**: search, **10 per page** (the pager is always shown); each opens to show when it was asked, **LLM calls per try** (e.g. *Meaning, try 1: 1 · SQL, round 1: 3*), **retries** (meaning re-asks + SQL round-2 calls), total input / output tokens, **LLM latency** (sum of call times; tries run in parallel, so it can exceed the total), **total latency** (time spent processing the question), outcome and **total LLM cost**. The question id is shown once, on the row; hovering it shows the original question.
+
+A question's steps are tied together by a **question id**: Scout's meaning step creates it, and "None of these" and **Confirm** reuse it. A question blocked before any LLM call still counts, with 0 calls and $0.
+
+**Tested:** 5 new tests (cost math; metrics for a question with a meaning re-ask and an SQL round 2: 8 calls, 4 retries, tokens and cost exact; per-period costs: 24 / 7 / 28-31 / 12 fixed slots, weeks starting Monday; a failed call recorded and still raised; 10 per page); all 93 pass. In the app: 3 real questions (Scribe, Scout, a blocked one) gave 5 calls, 5,138 input and 1,972 output tokens (1,579 reasoning), **$0.00178** in total; the Scout question alone was $0.00161 for 4 calls. Checked in light, dark and phone sizes.
+
+**Small fix along the way:** Scribe's question endpoint was `async` while doing slow, blocking work (search + LLM call), which held up every other request; it's now a normal endpoint that runs in the server's thread pool.
 
 ---
 
@@ -802,7 +967,7 @@ Also seen: 5 tables were sent for a question that only needs `customers`.
 
 ### Issue 3: The answer isn't explained
 
-> **Status: open (planned for the next version).**
+> **Status: fixed in [Version-10](#version-10-check-the-steps-rate-the-answer)**: the user checks the steps before the SQL is written, and the answer shows them under "How this was answered".
 
 **What happened.** Scout shows the result table and the tables used, but not *why*: how the question was turned into this answer isn't clear to a user.
 
@@ -810,7 +975,7 @@ Also seen: 5 tables were sent for a question that only needs `customers`.
 
 ### Issue 4: "All attempts" and the stats aren't useful to most users
 
-> **Status: open (planned for the next version).**
+> **Status: fixed.** The [Dashboard](#dashboard-llm-usage-and-cost) explains each question's LLM calls, retries, tokens, time and cost, and "All attempts" is removed from the Ask view ([Version-10](#version-10-check-the-steps-rate-the-answer)).
 
 **What happened.** Every SQL attempt is listed under the answer. That's detail for developers, not something a user needs while reading the answer; and metrics like confidence and LLM calls aren't explained.
 

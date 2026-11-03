@@ -8,9 +8,9 @@ step follows.
 """
 import json
 import re
-from typing import List
+from typing import List, Optional
 
-from backend.llm import make_client
+from backend.llm import chat, make_client
 
 from backend.config import GROQ_API_KEY, GROQ_MODEL_SQL
 
@@ -27,7 +27,10 @@ SYSTEM_PROMPT = (
     "The FIRST meaning is always the plain, literal reading of the question. No meaning may add "
     "columns, details or filters the question doesn't ask for (if only names are asked for, don't "
     "add their city); meanings differ only in how they read what IS asked.\n"
-    "Write for someone who doesn't know SQL: plain words, no SQL, no column names in code style.\n"
+    "Write for someone who doesn't know SQL or this database: plain everyday words only. Never use "
+    "table or column names (no order_date, employee_id, order_items, unit_price_cents); say 'the order "
+    "date', 'the employee', 'the price' instead. If a column has no clear everyday meaning, describe "
+    "it as best you can. No SQL, no code formatting.\n"
     "If the question asks to change the data in any way (add, insert, update, edit, delete, remove, "
     "create, drop, rename, reset, increase...), describe it honestly as that change, never as a "
     "read-only question, and set changes_data to true.\n"
@@ -45,9 +48,14 @@ class QuestionInterpreter:
         self.model_name = GROQ_MODEL_SQL
         self.client = None
 
-    def options(self, question: str, schema: str, context: str = "", history: List[dict] = ()) -> List[dict]:
+    def options(
+        self, question: str, schema: str, context: str = "", history: List[dict] = (), tag: Optional[dict] = None,
+        known: str = "",
+    ) -> List[dict]:
         """
         history: earlier rounds the user rejected, each {"options": [...], "comment": "..."}.
+        known: a saved meaning already shown as the first option (Version-12); the model then
+        writes up to 2 others that differ from it.
         One LLM call. Returns [{"meaning": str, "choices": [str]}].
         """
         if not self.api_key:
@@ -57,19 +65,21 @@ class QuestionInterpreter:
         if self.client is None:
             self.client = make_client(self.api_key)
 
-        completion = self.client.chat.completions.create(
+        completion = chat(
+            self.client,
+            tag,
             model=self.model_name,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": self.prompt(question, schema, context, history)},
+                {"role": "user", "content": self.prompt(question, schema, context, history, known)},
             ],
             temperature=0,
             response_format={"type": "json_object"},
         )
-        return self._parse(completion.choices[0].message.content or "")
+        return self._parse(completion.choices[0].message.content or "", MAX_OPTIONS - 1 if known else MAX_OPTIONS)
 
     @staticmethod
-    def prompt(question: str, schema: str, context: str, history: List[dict]) -> str:
+    def prompt(question: str, schema: str, context: str, history: List[dict], known: str = "") -> str:
         prompt = f"Schema:\n{schema}\n\n"
         if context:
             prompt += f"Context:\n{context}\n\n"
@@ -81,14 +91,20 @@ class QuestionInterpreter:
                 f"The user said none of them is right and explained: \"{past['comment']}\"\n"
                 "Use the user's explanation exactly; it decides anything it mentions."
             )
+        if known:
+            prompt += (
+                f"\n\nThis meaning is already offered to the user as the first option:\n{known}\n"
+                f"List 1 to {MAX_OPTIONS - 1} OTHER meanings that differ from it in at least one choice. "
+                "Never repeat it in other words."
+            )
         return prompt
 
     @staticmethod
-    def _parse(text: str) -> List[dict]:
+    def _parse(text: str, limit: int = MAX_OPTIONS) -> List[dict]:
         match = re.search(r"\{.*\}", text, re.DOTALL)
         data = json.loads(match.group(0) if match else text)
         options = []
-        for item in data.get("options", [])[:MAX_OPTIONS]:
+        for item in data.get("options", [])[:limit]:
             meaning = str(item.get("meaning", "")).strip()
             if meaning and meaning not in (o["meaning"] for o in options):
                 options.append({

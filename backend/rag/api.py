@@ -5,6 +5,7 @@ from backend.rag.schemas import QueryResponse
 
 from backend.rag.documents import MAX_UPLOAD_BYTES, DocumentStore
 from backend.rag.pipeline import RAGPipeline
+from backend.usage import Timer, usage_store
 from backend.rag.feedback.logger import log_feedback
 
 router = APIRouter(prefix="/api/rag", tags=["RAG"])
@@ -16,6 +17,7 @@ class FeedbackPayload(BaseModel):
     rating: str  # "up" or "down"
     comment: str | None = None
     metadata: dict | None = None
+    question_id: str | None = None  # Scribe's question on the Dashboard
 
 # single pipeline instance for the whole app
 pipeline = RAGPipeline()
@@ -23,7 +25,7 @@ documents = DocumentStore(pipeline.index, pipeline.text_encoder)
 
 
 @router.post("/query", response_model=QueryResponse)
-async def query_endpoint(
+def query_endpoint(
     query_text: str | None = Form(None),
     sources: str | None = Form(None),
     collections: str | None = Form(None),
@@ -36,13 +38,17 @@ async def query_endpoint(
     if collections:
         collection_list = [c.strip() for c in collections.split(",") if c.strip()]
 
-    result = pipeline.run(
-        query_text=query_text,
-        sources=source_list,
-        collections=collection_list,
-    )
+    with Timer(usage_store) as timer:
+        timer.question_id = usage_store.start_question("scribe", query_text or "")
+        result = pipeline.run(
+            query_text=query_text,
+            sources=source_list,
+            collections=collection_list,
+            question_id=timer.question_id,
+        )
+        usage_store.finish(timer.question_id, "answered" if result.get("citations") else "no matching passages")
 
-    return JSONResponse(result)
+    return JSONResponse({**result, "question_id": timer.question_id})
 
 @router.post("/feedback")
 async def feedback_endpoint(payload: FeedbackPayload):
@@ -67,6 +73,13 @@ async def feedback_endpoint(payload: FeedbackPayload):
     }
 
     log_feedback(event)
+    if payload.question_id:
+        try:
+            usage_store.add_feedback(payload.question_id, rating, payload.comment or "", {
+                "answer": payload.answer, "citations": payload.citations,
+            })
+        except KeyError:
+            pass  # an answer from before the Dashboard existed
 
     return {"status": "ok"}
 

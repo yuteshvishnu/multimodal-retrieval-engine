@@ -15,6 +15,9 @@ Run from the project root:
     python -m scripts.text_to_sql.evaluate --ids 3,7,8         # only these questions
     python -m scripts.text_to_sql.evaluate --confirm           # the app's flow: confirm the meaning first
     python -m scripts.text_to_sql.evaluate --questions path/to/questions.json
+
+Every wrong answer is also saved as an "Eval" issue on the Dashboard (Version-11), where
+the Failure Analyst agent can investigate it; --no-issues turns that off.
 """
 import argparse
 import json
@@ -26,6 +29,7 @@ import numpy as np
 
 from backend.rag.encoders.text_encoder import get_text_encoder
 from backend.text_to_sql.pipeline import TOP_K_TABLES, TextToSQLPipeline
+from backend.usage import usage_store
 
 DEFAULT_QUESTIONS = Path("data/text_to_sql/retail_store/questions.json")
 
@@ -65,6 +69,7 @@ def main():
     parser.add_argument("--ids", help="comma-separated question ids to run, e.g. 3,7,8")
     parser.add_argument("--confirm", action="store_true",
                         help="like the app: get the meanings, pick one (simulated user), then write SQL")
+    parser.add_argument("--no-issues", action="store_true", help="don't save wrong answers as Dashboard issues")
     args = parser.parse_args()
 
     questions = json.loads(args.questions.read_text(encoding="utf-8"))
@@ -132,6 +137,12 @@ def main():
             print(f"  Expected:  {gold_rows[:5]}")
             if q.get("trap"):
                 print(f"  Trap:      {q['trap']}")
+            if not args.no_issues:
+                usage_store.add_issue("eval", q["question"], {
+                    "eval_id": q["id"], "difficulty": q["difficulty"], "trap": q.get("trap"), "meaning": meaning,
+                    "sql": result.get("sql"), "error": result.get("error"), "rows": rows[:10],
+                    "gold_sql": q["gold_sql"], "expected_rows": gold_rows[:10],
+                })
 
     total = len(questions)
     mode = "full schema" if args.full_schema else f"top-{args.k} + bridge tables"

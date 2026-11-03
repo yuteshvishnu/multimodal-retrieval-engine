@@ -1,6 +1,8 @@
 import { useRef, useState } from "react";
 import { getJson, postForm } from "../api.js";
-import { CopyButton, DataTable, ErrorAlert, Icon, LimitAlert, Loading, Pagination, SafetyAlert, SqlCode } from "../components/ui.jsx";
+import {
+  CopyButton, DataTable, ErrorAlert, Icon, LimitAlert, Loading, Pagination, SafetyAlert, SqlCode,
+} from "../components/ui.jsx";
 
 const EXAMPLES = [
   "How many orders were placed in March 2026?",
@@ -8,7 +10,7 @@ const EXAMPLES = [
   "For each store that has orders, which employee handled the most orders there?",
 ];
 
-const STEPS = ["Ask", "Confirm meaning", "Answer"];
+const STEPS = ["Ask", "Confirm meaning", "Check steps", "Answer"];
 
 // The model's meaning plus its choices, as one text for the SQL step.
 function meaningText(option) {
@@ -21,8 +23,11 @@ function splitMeaning(text) {
   return { meaning: first, choices: rest.map((line) => line.replace(/^- /, "")) };
 }
 
-// Rexie Scout, Ask view: ask a question, pick what it means (or explain), then the LLM writes SQL,
-// the backend runs it, and we show the table.
+// Rexie Scout, Ask view: ask a question, pick what it means (or explain), check the steps
+// (or comment on wrong ones), then the LLM writes SQL that follows them, the backend runs it,
+// and we show the table with the steps; the user can report an issue with it. When the question
+// was answered before (in any words), its meaning is the first option, and picking it answers
+// straight away (Version-12).
 export default function SqlTab() {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(""); // what we're waiting for, or ""
@@ -34,16 +39,20 @@ export default function SqlTab() {
   const [history, setHistory] = useState([]); // rejected sets of options + the user's comment
   const [picked, setPicked] = useState(null); // option index, or "none"
   const [comment, setComment] = useState("");
+  const [questionId, setQuestionId] = useState(""); // ties this question's steps together on the Dashboard
   const inputRef = useRef(null);
   const [lastAnswer, setLastAnswer] = useState(null); // {question, meaning, sql} of the latest answer
   const [followUp, setFollowUp] = useState(false); // ask the next question as a follow-up to it
+  const [meaning, setMeaning] = useState(""); // the meaning the user confirmed
+  const [plan, setPlan] = useState(null); // {steps, round, max_rounds} to check (Version-10)
+  const [planHistory, setPlanHistory] = useState([]); // earlier steps + the user's comments
 
   // what a follow-up refers to, sent with both steps
   const previous = followUp && lastAnswer ? JSON.stringify(lastAnswer) : "";
 
-  const step = result ? 2 : clarify ? 1 : loading === "query" ? 2 : 0;
+  const step = result || loading === "query" ? 3 : plan || loading === "plan" ? 2 : clarify ? 1 : 0;
 
-  async function interpret(text, pastRounds) {
+  async function interpret(text, pastRounds, id = questionId) {
     setLoading("interpret");
     setError("");
     setSafety("");
@@ -56,7 +65,9 @@ export default function SqlTab() {
         query_text: text,
         history: JSON.stringify(pastRounds),
         previous,
+        question_id: id,
       });
+      if (data.question_id) setQuestionId(data.question_id);
       if (data.safety) setSafety(data.safety);
       else if (data.error) setError(data.error);
       else setClarify(data);
@@ -69,8 +80,11 @@ export default function SqlTab() {
 
   function start(text) {
     setResult(null);
+    setPlan(null);
+    setPlanHistory([]);
     setHistory([]);
-    interpret(text, []);
+    setQuestionId(""); // a new question gets a new id
+    interpret(text, [], "");
   }
 
   function handleSubmit(event) {
@@ -92,14 +106,67 @@ export default function SqlTab() {
       return;
     }
 
-    const meaning = meaningText(clarify.options[picked]);
+    const option = clarify.options[picked];
+    const confirmed = meaningText(option);
+    setMeaning(confirmed);
     setClarify(null);
+    setPlanHistory([]);
+    // a saved answer's meaning: run its SQL again; if that can't be done, write the steps as usual
+    if (option.reuse_id) runQuery([], confirmed, option.reuse_id);
+    else requestPlan(confirmed, []);
+  }
+
+  // the steps for the confirmed meaning; pastTries holds earlier steps with the user's comments
+  async function requestPlan(confirmed, pastTries) {
+    setLoading("plan");
+    setError("");
+    setSafety("");
+    setPlan(null);
+    try {
+      const data = await postForm("/api/sql/plan", {
+        query_text: question,
+        meaning: confirmed,
+        previous,
+        question_id: questionId,
+        history: JSON.stringify(pastTries),
+      });
+      if (data.safety) setSafety(data.safety);
+      else if (data.error) setError(data.error);
+      else setPlan(data);
+    } catch (err) {
+      setError(`Error: ${err.message}`);
+    } finally {
+      setLoading("");
+    }
+  }
+
+  // only the steps are written again, with the user's comments; the meaning stays
+  function rerunSteps(comments) {
+    const pastTries = [...planHistory, { steps: plan.steps, comments }];
+    setPlanHistory(pastTries);
+    requestPlan(meaning, pastTries);
+  }
+
+  async function runQuery(steps = plan.steps, confirmed = meaning, reuseId = "") {
+    setPlan(null);
     setLoading("query");
     setError("");
     setSafety("");
     setLimit("");
     try {
-      const data = await postForm("/api/sql/query", { query_text: question, meaning, previous });
+      const data = await postForm("/api/sql/query", {
+        query_text: question,
+        meaning: confirmed,
+        previous,
+        question_id: questionId,
+        steps: JSON.stringify(steps),
+        reuse_id: reuseId,
+      });
+      if (data.fallback) {
+        setLoading("");
+        requestPlan(confirmed, []);
+        return;
+      }
       if (data.safety) {
         setSafety(data.safety); // blocked: nothing was run, so there is no result to show
       } else if (data.limit) {
@@ -108,7 +175,7 @@ export default function SqlTab() {
         if (data.error) setError(data.error);
         setResult(data);
         if (data.sql && !data.error) {
-          setLastAnswer({ question, meaning, sql: data.sql });
+          setLastAnswer({ question, meaning: confirmed, sql: data.sql });
           setFollowUp(false);
         }
       }
@@ -124,6 +191,9 @@ export default function SqlTab() {
     setQuestion("");
     setResult(null);
     setClarify(null);
+    setPlan(null);
+    setPlanHistory([]);
+    setMeaning("");
     setHistory([]);
     setPicked(null);
     setComment("");
@@ -131,11 +201,12 @@ export default function SqlTab() {
     setSafety("");
     setLimit("");
     setFollowUp(false);
+    setQuestionId("");
     inputRef.current?.focus();
   }
 
   const busy = loading !== "";
-  const idle = !busy && !clarify && !result && !error && !safety && !limit;
+  const idle = !busy && !clarify && !plan && !result && !error && !safety && !limit;
 
   return (
     <section>
@@ -207,6 +278,7 @@ export default function SqlTab() {
       )}
 
       {loading === "interpret" && <Loading text="Working out what you mean..." />}
+      {loading === "plan" && <Loading text="Breaking it into steps..." />}
       {loading === "query" && <Loading text="Writing SQL, checking it and running it..." />}
       {safety && <SafetyAlert message={safety} />}
       {limit && <LimitAlert message={limit} />}
@@ -239,7 +311,9 @@ export default function SqlTab() {
                 <label key={i} className={`option ${picked === i ? "picked" : ""}`}>
                   <input type="radio" name="meaning" checked={picked === i} onChange={() => setPicked(i)} />
                   <div>
-                    <div className="option-text">{option.meaning}</div>
+                    <div className="option-text">
+                      {option.meaning}
+                    </div>
                     {option.choices.length > 0 && (
                       <div className="option-choices">
                         {option.choices.map((c) => (
@@ -274,7 +348,7 @@ export default function SqlTab() {
 
             <div className="clarify-footer">
               <button type="submit" className="btn btn-primary btn-sm" disabled={picked === null}>
-                {picked === "none" ? "Show new options" : "Confirm and run"}
+                {picked === "none" ? "Show new options" : "Confirm meaning"}
                 <Icon name="arrow" size={14} />
               </button>
             </div>
@@ -282,15 +356,105 @@ export default function SqlTab() {
         </form>
       )}
 
-      {result?.sql && <SqlResult key={result.sql} result={result} />}
+      {plan && <StepsCheck key={plan.round} plan={plan} onRerun={rerunSteps} onConfirm={() => runQuery()} />}
+
+      {result?.sql && <SqlResult key={result.sql} result={result} meaning={meaning} questionId={questionId} />}
     </section>
   );
 }
 
-function SqlResult({ result }) {
-  // no query worked: the message is shown above; here only what was tried (Version-9)
-  if (result.error) return <Attempts attempts={result.attempts} />;
+// Version-10: the steps to check. Click a step to say what's wrong with it; "Re-run steps"
+// writes only the steps again with those comments; "Confirm steps" writes and runs the SQL.
+function StepsCheck({ plan, onRerun, onConfirm }) {
+  const [comments, setComments] = useState({}); // step index -> comment
+  const [open, setOpen] = useState(null); // the step being commented on
 
+  const flagged = Object.entries(comments).filter(([, c]) => c.trim());
+  const lastTry = plan.round >= plan.max_rounds;
+
+  function rerun() {
+    onRerun(flagged.map(([i, comment]) => ({ step: Number(i) + 1, comment: comment.trim() })));
+  }
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <h3 className="card-title">
+          <Icon name="layers" />
+          Check the steps
+        </h3>
+        <span className="tag">
+          Try {plan.round} of {plan.max_rounds}
+        </span>
+      </div>
+      <div className="card-body">
+        <p className="muted steps-intro">
+          This is how Scout will answer. Click a step that isn't right and say what's wrong.
+        </p>
+        <ol className="plan-steps">
+          {plan.steps.map((text, i) => {
+            const note = comments[i] || "";
+            return (
+              <li key={i} className={`plan-step ${note.trim() ? "flagged" : ""} ${open === i ? "open" : ""}`}>
+                <button type="button" className="plan-step-head" onClick={() => setOpen(open === i ? null : i)}>
+                  <span className="plan-step-no">{i + 1}</span>
+                  <span className="plan-step-text">
+                    {text}
+                  </span>
+                  <span className="plan-step-action">
+                    {note.trim() ? (
+                      <>
+                        <Icon name="alert" size={13} /> Flagged
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="edit" size={13} /> Not right?
+                      </>
+                    )}
+                  </span>
+                </button>
+                {open === i && (
+                  <textarea
+                    value={note}
+                    onChange={(e) => setComments({ ...comments, [i]: e.target.value })}
+                    placeholder="What's wrong with this step? e.g. count cancelled orders too"
+                    rows={2}
+                    autoFocus
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ol>
+
+        <div className="review-actions steps-actions">
+          {flagged.length > 0 ? (
+            <button type="button" className="btn btn-primary btn-sm" onClick={rerun} disabled={lastTry}>
+              <Icon name="refresh" size={14} />
+              Re-run steps ({flagged.length} comment{flagged.length === 1 ? "" : "s"})
+            </button>
+          ) : (
+            <button type="button" className="btn btn-primary btn-sm" onClick={onConfirm}>
+              <Icon name="check" size={14} />
+              Steps look right: answer
+            </button>
+          )}
+          {lastTry && flagged.length > 0 && (
+            <span className="muted">That was the last try. Remove the comments to answer, or rephrase the question.</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SqlResult({ result, meaning, questionId }) {
+  // no query worked: the plain-English message above is all the user needs (Version-9)
+  if (result.error) return null;
+  return <Answer result={result} confirmedMeaning={meaning} questionId={questionId} />;
+}
+
+function Answer({ result, confirmedMeaning, questionId }) {
   const meaning = result.meaning ? splitMeaning(result.meaning) : null;
   // page 1 comes with the answer; other pages are loaded from the server when clicked (Version-8)
   const [view, setView] = useState({ page: 1, rows: result.rows });
@@ -320,7 +484,9 @@ function SqlResult({ result }) {
         {meaning && (
           <div className="meaning-box">
             <div className="label">Meaning you confirmed</div>
-            <div className="option-text">{meaning.meaning}</div>
+            <div className="option-text">
+              {meaning.meaning}
+            </div>
             {meaning.choices.length > 0 && (
               <div className="option-choices">
                 {meaning.choices.map((c) => (
@@ -330,6 +496,18 @@ function SqlResult({ result }) {
                 ))}
               </div>
             )}
+          </div>
+        )}
+        {result.steps?.length > 0 && (
+          <div className="meaning-box steps-followed">
+            <div className="label">How this was answered</div>
+            <ol className="steps-list">
+              {result.steps.map((s, i) => (
+                <li key={i}>
+                  {s}
+                </li>
+              ))}
+            </ol>
           </div>
         )}
         <div className="stats">
@@ -391,6 +569,7 @@ function SqlResult({ result }) {
           </div>
           {pageError && <ErrorAlert message={pageError} />}
           <Pagination page={view.page} pages={pages} total={rowsLabel} onPage={loadPage} />
+          <AnswerFeedback result={result} meaning={confirmedMeaning} questionId={questionId} rows={view.rows} />
         </div>
       )}
 
@@ -404,38 +583,83 @@ function SqlResult({ result }) {
         </div>
         <SqlCode sql={result.sql} />
       </div>
-
-      <Attempts attempts={result.attempts} />
     </>
   );
 }
 
-// Every SQL the model wrote and what happened to it, collapsed by default.
-function Attempts({ attempts, open = false }) {
-  if (!attempts?.length) return null;
+// Report issue on the answer (Version-10; Version-12: an answer nobody reports counts as right,
+// so there's no "Correct" button). A report needs a comment, and is logged with what the user
+// saw (steps, SQL, first rows) as an issue on the Dashboard, where the Failure Analyst agent can
+// investigate it (Version-11). A reported answer is never reused.
+function AnswerFeedback({ result, meaning, questionId, rows }) {
+  const [rating, setRating] = useState(null); // sent: "up" | "down"
+  const [writing, setWriting] = useState(false);
+  const [comment, setComment] = useState("");
+  const [error, setError] = useState("");
+
+  async function send(value, text = "") {
+    setError("");
+    try {
+      await postForm("/api/sql/feedback", {
+        question_id: questionId,
+        rating: value,
+        comment: text,
+        details: JSON.stringify({
+          meaning,
+          steps: result.steps,
+          sql: result.sql,
+          columns: result.columns,
+          rows: rows.slice(0, 10),
+          row_count: result.row_count,
+        }),
+      });
+      setRating(value);
+      setWriting(false);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  if (!questionId) return null;
   return (
-    <details className="card attempts" open={open}>
-      <summary>
-        <span className="card-title">
-          <Icon name="layers" />
-          All attempts
-          <span className="tag">{attempts.length}</span>
-        </span>
-        <span className="chevron">
-          <Icon name="chevron" />
-        </span>
-      </summary>
-      {attempts.map((a, i) => (
-        <div key={i} className="attempt">
-          <div className="attempt-head">
-            <strong>Attempt {i + 1}</strong>
-            <span>· Round {a.round} ·</span>
-            <span className={`status-${a.status}`}>{a.status}</span>
+    <div className="answer-feedback">
+      {rating ? (
+        <span className="muted">Thanks. Logged as an issue on the Dashboard.</span>
+      ) : writing ? (
+        <form
+          className="feedback-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            send("down", comment);
+          }}
+        >
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="What's wrong with this answer?"
+            rows={2}
+            autoFocus
+            required
+          />
+          <div className="review-actions">
+            <button type="submit" className="btn btn-primary btn-sm" disabled={!comment.trim()}>
+              Send
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setWriting(false)}>
+              Cancel
+            </button>
           </div>
-          {a.problems.length > 0 && <p className="problems">{a.problems.join(" ")}</p>}
-          {a.sql && <SqlCode sql={a.sql} />}
-        </div>
-      ))}
-    </details>
+        </form>
+      ) : (
+        <>
+          <span className="muted">Something wrong with this answer?</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setWriting(true)}>
+            <Icon name="flag" size={14} />
+            Report issue
+          </button>
+        </>
+      )}
+      {error && <span className="problems">{error}</span>}
+    </div>
   );
 }

@@ -79,7 +79,7 @@ def pipeline():
 
 def fake_llm(pipeline, first_sql, later_sql, seen_feedback):
     """Writes first_sql until it gets feedback, then later_sql; records the feedback."""
-    def generate(question, schema, budget, context="", feedback="", meaning="", temperature=0):
+    def generate(question, schema, budget, context="", feedback="", **kwargs):
         budget.take()
         seen_feedback.append(feedback)
         return later_sql if feedback else first_sql

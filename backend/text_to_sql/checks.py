@@ -224,6 +224,25 @@ def check_result(question: str, sql: str, columns: List[str], rows: List[list], 
     return _unique(warnings)
 
 
+def tables_in_sql(sql: str, known: List[str]) -> List[str]:
+    """
+    The real tables a query reads, from the SQL itself (read with the parser): no WITH step
+    names, no guessing. In the order they appear; only names of tables that exist.
+    """
+    try:
+        tree = sqlglot.parse_one(sql, read="sqlite")
+    except sqlglot.errors.ParseError:
+        return []
+    steps = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
+    exact = {name.lower(): name for name in known}
+    used = []
+    for table in tree.find_all(exp.Table):
+        name = table.name.lower()
+        if name in exact and name not in steps and exact[name] not in used:
+            used.append(exact[name])
+    return used
+
+
 def describe_rows(rows: List[list]) -> str:
     """What the LLM is told about a result: the first rows, or only the count if rows aren't shared."""
     if not SHARE_ROWS_WITH_LLM:

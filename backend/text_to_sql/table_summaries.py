@@ -29,7 +29,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from backend.llm import make_client
+from backend.llm import chat, make_client
 
 from backend.config import GROQ_MODEL_SUMMARY, SHARE_ROWS_WITH_LLM
 
@@ -161,7 +161,9 @@ class TableSummarizer:
         if self.client is None:
             raise RuntimeError("GROQ_API_KEY is not set.")
         prompt = self._table_prompt(table, feedback) + f"\n\nCurrent description (the user says it is wrong):\n{current}"
-        completion = self.client.chat.completions.create(
+        completion = chat(
+            self.client,
+            {"stage": "table_description"},
             model=GROQ_MODEL_SUMMARY,
             messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
             temperature=0.2,
@@ -178,7 +180,9 @@ class TableSummarizer:
             {"role": "user", "content": self._table_prompt(table, feedback)},
         ]
         for attempt in range(1, MAX_ATTEMPTS + 1):
-            completion = self.client.chat.completions.create(
+            completion = chat(
+                self.client,
+                {"stage": "table_description"},
                 model=GROQ_MODEL_SUMMARY,
                 messages=messages,
                 temperature=0.2,

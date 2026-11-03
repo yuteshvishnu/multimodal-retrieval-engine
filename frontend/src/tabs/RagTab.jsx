@@ -259,7 +259,7 @@ function DocumentPicker({ documents, selected, onChange }) {
   );
 }
 
-// 👍 / 👎 on an answer, logged to data/rag/feedback/ to tune retrieval later (Version-1.7).
+// Correct / Report issue on an answer, logged to data/rag/feedback/ to tune retrieval later (Version-1.7).
 function Feedback({ question, result }) {
   const [sent, setSent] = useState(null); // "up" | "down"
   const [error, setError] = useState("");
@@ -272,6 +272,7 @@ function Feedback({ question, result }) {
         answer: result.answer,
         citations: result.citations.map(({ id, source, score }) => ({ id, source, score })),
         rating,
+        question_id: result.question_id, // so it shows on the Dashboard
       });
       setSent(rating);
     } catch (err) {
@@ -285,12 +286,14 @@ function Feedback({ question, result }) {
         <span className="muted">Thanks for the feedback.</span>
       ) : (
         <>
-          <span className="muted">Was this helpful?</span>
-          <button type="button" className="icon-btn" onClick={() => send("up")} aria-label="Helpful">
-            👍
+          <span className="muted">Is this answer correct?</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => send("up")}>
+            <Icon name="check" size={14} />
+            Correct
           </button>
-          <button type="button" className="icon-btn" onClick={() => send("down")} aria-label="Not helpful">
-            👎
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => send("down")}>
+            <Icon name="flag" size={14} />
+            Report issue
           </button>
         </>
       )}

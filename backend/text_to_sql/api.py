@@ -4,10 +4,11 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from backend.text_to_sql.catalog import PAGE_SIZE, check_new_tables, list_tables, save_upload
-from backend.text_to_sql.schemas import InterpretResponse, QueryResponse
+from backend.text_to_sql.schemas import InterpretResponse, PlanResponse, QueryResponse
 from backend.text_to_sql.table_summaries import TableSummarizer, save_summary
 
 from backend.text_to_sql.pipeline import TextToSQLPipeline
+from backend.usage import Timer, usage_store
 
 router = APIRouter(prefix="/api/sql", tags=["Text-to-SQL"])
 
@@ -18,17 +19,101 @@ MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
 
 @router.post("/interpret", response_model=InterpretResponse)
-def interpret_endpoint(query_text: str = Form(""), history: str = Form("[]"), previous: str = Form("")):
+def interpret_endpoint(
+    query_text: str = Form(""), history: str = Form("[]"), previous: str = Form(""), question_id: str = Form("")
+):
     """
     Version-5: up to 3 meanings of the question. history = JSON list of rejected rounds.
     previous = JSON {question, meaning, sql} of the answer this follows up on (optional).
+    question_id: the question's id from an earlier step (none on the first step).
     """
-    return pipeline.interpret(query_text, json.loads(history), _previous(previous))
+    with Timer(usage_store) as timer:
+        timer.question_id = usage_store.start_question("scout", query_text, question_id or None)
+        result = pipeline.interpret(query_text, json.loads(history), _previous(previous), timer.question_id)
+        usage_store.finish(timer.question_id, _outcome(result, waiting="waiting for meaning"))
+    return {**result, "question_id": timer.question_id}
+
+
+@router.post("/plan", response_model=PlanResponse)
+def plan_endpoint(
+    query_text: str = Form(""), meaning: str = Form(""), previous: str = Form(""), question_id: str = Form(""),
+    history: str = Form("[]"),
+):
+    """
+    Version-10: the steps for the confirmed meaning. history = JSON list of earlier tries with
+    the user's comments, [{"steps": [...], "comments": [{"step": 2, "comment": "..."}]}].
+    """
+    with Timer(usage_store) as timer:
+        timer.question_id = usage_store.start_question("scout", query_text, question_id or None)
+        result = pipeline.plan(query_text, meaning, _previous(previous), timer.question_id, json.loads(history))
+        usage_store.finish(timer.question_id, _outcome(result, waiting="waiting for steps"))
+    return {**result, "question_id": timer.question_id}
 
 
 @router.post("/query", response_model=QueryResponse)
-def query_endpoint(query_text: str = Form(""), meaning: str = Form(""), previous: str = Form("")):
-    return pipeline.run(query_text, meaning, _previous(previous))
+def query_endpoint(
+    query_text: str = Form(""), meaning: str = Form(""), previous: str = Form(""), question_id: str = Form(""),
+    steps: str = Form("[]"), reuse_id: str = Form(""),
+):
+    """
+    Writes and runs the SQL. reuse_id (Version-12): the user picked a saved answer's meaning,
+    so its SQL runs again instead; {"fallback": true} if it can't, and the UI asks for steps.
+    """
+    with Timer(usage_store) as timer:
+        timer.question_id = usage_store.start_question("scout", query_text, question_id or None)
+        if reuse_id:
+            result = pipeline.reuse(reuse_id, timer.question_id)
+            if result.get("fallback"):
+                return {**result, "question_id": timer.question_id}
+            usage_store.finish(timer.question_id, "answered (reused)", result.get("confidence"))
+            return {**result, "question_id": timer.question_id}
+        confirmed = [str(s) for s in json.loads(steps or "[]") if str(s).strip()]
+        result = pipeline.run(query_text, meaning, _previous(previous), timer.question_id, confirmed)
+        usage_store.finish(timer.question_id, _outcome(result), result.get("confidence"))
+    # Version-11: SQL that SQLite kept rejecting becomes an issue for the Failure Analyst
+    failed = [a for a in result.get("attempts", []) if a["status"] in ("rejected", "failed")]
+    if timer.question_id and _outcome(result) == "failed" and failed:
+        usage_store.add_issue("sql_error", query_text, {
+            "meaning": meaning, "steps": confirmed, "error": result.get("error"),
+            "attempts": [{"round": a["round"], "sql": a["sql"], "problems": a["problems"]} for a in failed],
+        }, timer.question_id)
+    return {**result, "question_id": timer.question_id}
+
+
+@router.post("/feedback")
+def feedback_endpoint(
+    question_id: str = Form(...), rating: str = Form(...), comment: str = Form(""), details: str = Form("{}")
+):
+    """
+    Version-10: Report issue (down) on an answer (Version-12: only reports; an answer nobody
+    reports counts as right, and "up" is still accepted for older clients). A report, with its comment
+    and what the user saw (steps, SQL, first rows), becomes an issue on the Dashboard that
+    the Failure Analyst can investigate (Version-11).
+    """
+    if rating == "down" and not comment.strip():
+        raise HTTPException(400, "Say what's wrong, so it can be fixed.")
+    seen = json.loads(details or "{}")
+    try:
+        usage_store.add_feedback(question_id, rating, comment, seen)
+    except KeyError:
+        raise HTTPException(404, "Unknown question.")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if rating == "down":
+        usage_store.add_issue("user_report", "", {**seen, "comment": comment.strip()}, question_id)
+        pipeline.answers.forget_question(question_id)  # Version-12: a reported answer is never reused
+    return {"ok": True}
+
+
+def _outcome(result: dict, waiting: str = "") -> str:
+    """How a question ended, for the Dashboard."""
+    if result.get("safety"):
+        return "blocked (write)"
+    if result.get("limit"):
+        return "too heavy"
+    if result.get("error"):
+        return "failed"
+    return waiting or "answered"
 
 
 def _previous(text: str):

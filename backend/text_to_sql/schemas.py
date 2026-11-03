@@ -4,7 +4,8 @@ from pydantic import BaseModel
 
 class QueryResponse(BaseModel):
     sql: Optional[str] = None
-    tables: List[str] = []  # tables sent to the LLM
+    tables: List[str] = []  # tables the answer used, read from its SQL (on failure: the tables offered)
+    tables_offered: List[str] = []  # tables the search picked and sent to the LLM
     columns: List[str] = []
     rows: List[List[Any]] = []
     error: Optional[str] = None
@@ -21,6 +22,10 @@ class QueryResponse(BaseModel):
     more: bool = False                # there were more rows than MAX_RESULT_ROWS
     page_size: int = 0
     result_id: Optional[str] = None   # for loading other pages
+    question_id: Optional[str] = None  # the question's id on the Dashboard
+    steps: List[str] = []             # the steps the user confirmed (Version-10)
+    reused: bool = False              # answered by re-running a saved answer's SQL (Version-12)
+    fallback: bool = False            # the saved answer couldn't be reused: write the steps as usual
 
 
 class InterpretResponse(BaseModel):
@@ -31,3 +36,15 @@ class InterpretResponse(BaseModel):
     llm_calls: int = 0
     error: Optional[str] = None
     safety: Optional[str] = None
+    question_id: Optional[str] = None
+
+
+class PlanResponse(BaseModel):
+    steps: List[str] = []             # the plan, for the user to check (Version-10)
+    round: int = 0
+    max_rounds: int = 0
+    tables: List[str] = []
+    llm_calls: int = 0
+    error: Optional[str] = None
+    safety: Optional[str] = None
+    question_id: Optional[str] = None
