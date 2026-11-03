@@ -18,6 +18,9 @@ const ICONS = {
   chevron: <path d="m9 6 6 6-6 6" />,
   sliders: <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M14 4v4M8 10v4M16 16v4" />,
   arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
+  trash: <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />,
+  clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  shield: <path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z" />,
   upload: <path d="M12 16V4M7 9l5-5 5 5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />,
   edit: <path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16zM13.5 6.5l4 4" />,
   left: <path d="m15 6-6 6 6 6" />,
@@ -59,6 +62,32 @@ export function ErrorAlert({ message }) {
     <div className="alert alert-error" role="alert">
       <Icon name="alert" />
       <span>{message}</span>
+    </div>
+  );
+}
+
+// A request stopped because it could change the database (Scout only reads data).
+export function SafetyAlert({ message }) {
+  return (
+    <div className="alert alert-warning alert-safety" role="alert">
+      <Icon name="shield" size={18} />
+      <div>
+        <strong>Scout only reads data</strong>
+        <p>{message}</p>
+      </div>
+    </div>
+  );
+}
+
+// A query stopped because it was too big or too slow (Version-8).
+export function LimitAlert({ message }) {
+  return (
+    <div className="alert alert-warning alert-safety" role="alert">
+      <Icon name="clock" size={18} />
+      <div>
+        <strong>Narrow it down</strong>
+        <p>{message}</p>
+      </div>
     </div>
   );
 }

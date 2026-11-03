@@ -1,12 +1,36 @@
+import base64
+import secrets
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
+from backend.config import APP_PASSWORD
 from backend.rag.api import router as rag_router
 from backend.text_to_sql.api import router as sql_router
 
 app = FastAPI(title="Rexie")
+
+
+@app.middleware("http")
+async def require_password(request: Request, call_next):
+    """
+    Optional login (APP_PASSWORD in .env): HTTP Basic auth, so the browser shows its own
+    sign-in box once and then sends the password with every request (UI and API).
+    """
+    if not APP_PASSWORD:
+        return await call_next(request)
+    header = request.headers.get("authorization", "")
+    password = ""
+    if header.lower().startswith("basic "):
+        try:
+            password = base64.b64decode(header[6:]).decode("utf-8").partition(":")[2]
+        except ValueError:
+            password = ""
+    if not secrets.compare_digest(password.encode(), APP_PASSWORD.encode()):
+        return Response("Sign in to use Rexie.", status_code=401, headers={"WWW-Authenticate": 'Basic realm="Rexie"'})
+    return await call_next(request)
 
 # RAG: /api/rag/...   Text-to-SQL: /api/sql/...
 app.include_router(rag_router)

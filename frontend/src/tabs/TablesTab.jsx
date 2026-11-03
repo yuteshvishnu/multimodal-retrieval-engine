@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getJson, postForm } from "../api.js";
+import { deleteJson, getJson, postForm } from "../api.js";
 import { DataTable, ErrorAlert, Icon, Loading, Pagination } from "../components/ui.jsx";
 
 // a description is either confirmed by the user or not
@@ -9,7 +9,7 @@ const STATUS = {
   basic: { label: "Not reviewed", className: "medium" },
 };
 
-// Text-to-SQL, Tables view: every table Rexie knows, what it understands about each one, a way to
+// Rexie Scout, Tables view: every table Rexie knows, what it understands about each one, a way to
 // correct that understanding, and adding a new .sqlite database.
 export default function TablesTab() {
   const [list, setList] = useState(null); // {items, page, pages, total}
@@ -69,6 +69,11 @@ export default function TablesTab() {
     }
   }
 
+  function handleDatabaseRemoved(name) {
+    setNotice({ text: `Removed the database ${name}. Scout no longer queries its tables.` });
+    load(1);
+  }
+
   function replaceTable(updated) {
     setList((current) => ({
       ...current,
@@ -83,7 +88,7 @@ export default function TablesTab() {
       <div className="page-header page-header-row">
         <div>
           <h1>Know your tables.</h1>
-          <p>Everything Rexie understands about your data. Spot something wrong? Tell Rexie and it rewrites it.</p>
+          <p>Everything Scout understands about your data. Spot something wrong? Tell Scout and it rewrites it.</p>
         </div>
         <button
           type="button"
@@ -146,7 +151,12 @@ export default function TablesTab() {
           )}
 
           {list.items.map((table) => (
-            <TableItem key={`${table.database}.${table.name}`} table={table} onSaved={replaceTable} />
+            <TableItem
+              key={`${table.database}.${table.name}`}
+              table={table}
+              onSaved={replaceTable}
+              onDatabaseRemoved={handleDatabaseRemoved}
+            />
           ))}
 
           <Pagination page={list.page} pages={list.pages} total={list.total} label="tables" onPage={(p) => load(p)} />
@@ -156,7 +166,27 @@ export default function TablesTab() {
   );
 }
 
-function TableItem({ table, onSaved }) {
+function TableItem({ table, onSaved, onDatabaseRemoved }) {
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState("");
+
+  async function removeDatabase() {
+    const ok = window.confirm(
+      `Remove the whole database “${table.database}”? Its .sqlite file, descriptions and summaries are deleted, ` +
+        "and Scout stops querying all of its tables. This can't be undone."
+    );
+    if (!ok) return;
+    setRemoving(true);
+    setRemoveError("");
+    try {
+      await deleteJson(`/api/sql/databases/${encodeURIComponent(table.database)}`);
+      onDatabaseRemoved(table.database);
+    } catch (err) {
+      setRemoveError(err.message);
+      setRemoving(false);
+    }
+  }
+
   const [open, setOpen] = useState(false);
   const status = STATUS[table.status];
 
@@ -193,6 +223,14 @@ function TableItem({ table, onSaved }) {
           </div>
 
           <RowPreview table={table} />
+
+          {removeError && <ErrorAlert message={removeError} />}
+          <div className="danger-zone">
+            <button type="button" className="btn btn-danger btn-sm" onClick={removeDatabase} disabled={removing}>
+              <Icon name="trash" size={14} />
+              {removing ? "Removing..." : `Remove database ${table.database}`}
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -257,7 +295,7 @@ function Review({ table, onSaved }) {
 
   return (
     <div className="review">
-      <div className="label">What Rexie understands</div>
+      <div className="label">What Scout understands</div>
 
       {mode !== "draft" && mode !== "saving" && <p className="description">{draft?.description || table.description}</p>}
 
@@ -340,7 +378,7 @@ function Review({ table, onSaved }) {
         </form>
       )}
 
-      {mode === "rewriting" && <Loading text="Rexie is rewriting the description..." />}
+      {mode === "rewriting" && <Loading text="Scout is rewriting the description..." />}
       {mode === "saving" && <Loading text="Saving and updating table search..." />}
     </div>
   );

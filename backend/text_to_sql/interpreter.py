@@ -10,9 +10,9 @@ import json
 import re
 from typing import List
 
-from openai import OpenAI
+from backend.llm import make_client
 
-from backend.config import GROQ_API_KEY, GROQ_BASE_URL, GROQ_MODEL_SQL
+from backend.config import GROQ_API_KEY, GROQ_MODEL_SQL
 
 MAX_OPTIONS = 3
 
@@ -25,9 +25,12 @@ SYSTEM_PROMPT = (
     "choices. Never list the same meaning twice in different words. If the question has only one "
     "sensible meaning, return just one.\n"
     "Write for someone who doesn't know SQL: plain words, no SQL, no column names in code style.\n"
+    "If the question asks to change the data in any way (add, insert, update, edit, delete, remove, "
+    "create, drop, rename, reset, increase...), describe it honestly as that change, never as a "
+    "read-only question, and set changes_data to true.\n"
     "Return only JSON in this shape:\n"
     '{"options": [{"meaning": "one sentence saying what will be computed", '
-    '"choices": ["short line per decision, e.g. Cancelled orders: counted"]}]}'
+    '"choices": ["short line per decision, e.g. Cancelled orders: counted"], "changes_data": false}]}'
 )
 
 
@@ -49,7 +52,7 @@ class QuestionInterpreter:
 
         # created on first use, so the server can start without a key
         if self.client is None:
-            self.client = OpenAI(base_url=GROQ_BASE_URL, api_key=self.api_key)
+            self.client = make_client(self.api_key)
 
         completion = self.client.chat.completions.create(
             model=self.model_name,
@@ -85,7 +88,11 @@ class QuestionInterpreter:
         for item in data.get("options", [])[:MAX_OPTIONS]:
             meaning = str(item.get("meaning", "")).strip()
             if meaning and meaning not in (o["meaning"] for o in options):
-                options.append({"meaning": meaning, "choices": [str(c).strip() for c in item.get("choices", [])]})
+                options.append({
+                    "meaning": meaning,
+                    "choices": [str(c).strip() for c in item.get("choices", [])],
+                    "changes_data": item.get("changes_data") is True,
+                })
         if not options:
             raise ValueError("The model returned no meanings.")
         return options

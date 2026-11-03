@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { postForm } from "../api.js";
-import { CopyButton, DataTable, ErrorAlert, Icon, Loading, Pagination, SqlCode } from "../components/ui.jsx";
+import { getJson, postForm } from "../api.js";
+import { CopyButton, DataTable, ErrorAlert, Icon, LimitAlert, Loading, Pagination, SafetyAlert, SqlCode } from "../components/ui.jsx";
 
 const EXAMPLES = [
   "How many orders were placed in March 2026?",
@@ -21,25 +21,32 @@ function splitMeaning(text) {
   return { meaning: first, choices: rest.map((line) => line.replace(/^- /, "")) };
 }
 
-const PAGE_SIZE = 10;
-
-// Text-to-SQL, Ask view: ask a question, pick what it means (or explain), then the LLM writes SQL,
+// Rexie Scout, Ask view: ask a question, pick what it means (or explain), then the LLM writes SQL,
 // the backend runs it, and we show the table.
 export default function SqlTab() {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(""); // what we're waiting for, or ""
   const [error, setError] = useState("");
+  const [safety, setSafety] = useState(""); // blocked: could change data (Version-7)
+  const [limit, setLimit] = useState(""); // stopped: too big or too slow (Version-8)
   const [result, setResult] = useState(null);
   const [clarify, setClarify] = useState(null); // {options, round, max_rounds}
   const [history, setHistory] = useState([]); // rejected sets of options + the user's comment
   const [picked, setPicked] = useState(null); // option index, or "none"
   const [comment, setComment] = useState("");
+  const [lastAnswer, setLastAnswer] = useState(null); // {question, meaning, sql} of the latest answer
+  const [followUp, setFollowUp] = useState(false); // ask the next question as a follow-up to it
+
+  // what a follow-up refers to, sent with both steps
+  const previous = followUp && lastAnswer ? JSON.stringify(lastAnswer) : "";
 
   const step = result ? 2 : clarify ? 1 : loading === "query" ? 2 : 0;
 
   async function interpret(text, pastRounds) {
     setLoading("interpret");
     setError("");
+    setSafety("");
+    setLimit("");
     setClarify(null);
     setPicked(null);
     setComment("");
@@ -47,8 +54,10 @@ export default function SqlTab() {
       const data = await postForm("/api/sql/interpret", {
         query_text: text,
         history: JSON.stringify(pastRounds),
+        previous,
       });
-      if (data.error) setError(data.error);
+      if (data.safety) setSafety(data.safety);
+      else if (data.error) setError(data.error);
       else setClarify(data);
     } catch (err) {
       setError(`Error: ${err.message}`);
@@ -86,10 +95,22 @@ export default function SqlTab() {
     setClarify(null);
     setLoading("query");
     setError("");
+    setSafety("");
+    setLimit("");
     try {
-      const data = await postForm("/api/sql/query", { query_text: question, meaning });
-      if (data.error) setError(data.error);
-      setResult(data);
+      const data = await postForm("/api/sql/query", { query_text: question, meaning, previous });
+      if (data.safety) {
+        setSafety(data.safety); // blocked: nothing was run, so there is no result to show
+      } else if (data.limit) {
+        setLimit(data.limit); // too big or too slow: nothing to show either
+      } else {
+        if (data.error) setError(data.error);
+        setResult(data);
+        if (data.sql && !data.error) {
+          setLastAnswer({ question, meaning, sql: data.sql });
+          setFollowUp(false);
+        }
+      }
     } catch (err) {
       setError(`Error: ${err.message}`);
     } finally {
@@ -98,13 +119,13 @@ export default function SqlTab() {
   }
 
   const busy = loading !== "";
-  const idle = !busy && !clarify && !result && !error;
+  const idle = !busy && !clarify && !result && !error && !safety && !limit;
 
   return (
     <section>
       <div className="page-header">
         <h1>Talk to your data.</h1>
-        <p>Ask anything in plain English. Rexie checks what you mean, then writes and runs the SQL for you.</p>
+        <p>Ask anything in plain English. Scout checks what you mean, then writes and runs the SQL for you.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="card composer">
@@ -125,6 +146,16 @@ export default function SqlTab() {
             <Icon name="arrow" />
           </button>
         </div>
+
+        {lastAnswer && (
+          <label className={`followup ${followUp ? "on" : ""}`}>
+            <input type="checkbox" checked={followUp} onChange={(e) => setFollowUp(e.target.checked)} />
+            <Icon name="link" size={13} />
+            <span>
+              Follow up on <strong>“{lastAnswer.question}”</strong>
+            </span>
+          </label>
+        )}
 
         {idle && (
           <div className="examples">
@@ -154,6 +185,8 @@ export default function SqlTab() {
 
       {loading === "interpret" && <Loading text="Working out what you mean..." />}
       {loading === "query" && <Loading text="Writing SQL, checking it and running it..." />}
+      {safety && <SafetyAlert message={safety} />}
+      {limit && <LimitAlert message={limit} />}
       {error && <ErrorAlert message={error} />}
 
       {idle && (
@@ -233,9 +266,27 @@ export default function SqlTab() {
 
 function SqlResult({ result }) {
   const meaning = result.meaning ? splitMeaning(result.meaning) : null;
-  const [page, setPage] = useState(1);
-  const pages = Math.max(1, Math.ceil(result.rows.length / PAGE_SIZE));
-  const start = (page - 1) * PAGE_SIZE;
+  // page 1 comes with the answer; other pages are loaded from the server when clicked (Version-8)
+  const [view, setView] = useState({ page: 1, rows: result.rows });
+  const [pageError, setPageError] = useState("");
+  const [loadingPage, setLoadingPage] = useState(false);
+  const pageSize = result.page_size || result.rows.length || 1;
+  const pages = Math.max(1, Math.ceil(result.row_count / pageSize));
+  const rowsLabel = `${result.row_count}${result.more ? "+" : ""}`;
+
+  async function loadPage(page) {
+    setLoadingPage(true);
+    setPageError("");
+    try {
+      const data = await getJson(`/api/sql/results/${result.result_id}`, { page });
+      if (data.error) setPageError(data.error);
+      else setView({ page: data.page, rows: data.rows });
+    } catch (err) {
+      setPageError(err.message);
+    } finally {
+      setLoadingPage(false);
+    }
+  }
 
   return (
     <>
@@ -258,7 +309,7 @@ function SqlResult({ result }) {
         <div className="stats">
           <div className="stat">
             <div className="label">Rows</div>
-            <div className="stat-value">{result.rows.length}</div>
+            <div className="stat-value">{rowsLabel}</div>
           </div>
           <div className="stat">
             <div className="label">Confidence</div>
@@ -302,15 +353,18 @@ function SqlResult({ result }) {
               Answer
             </h3>
             <span className="tag">
-              {result.rows.length} row{result.rows.length === 1 ? "" : "s"}
+              {rowsLabel} row{result.row_count === 1 ? "" : "s"}
             </span>
           </div>
-          <DataTable
-            columns={result.columns}
-            rows={result.rows.slice(start, start + PAGE_SIZE)}
-            firstIndex={start + 1}
-          />
-          <Pagination page={page} pages={pages} total={result.rows.length} onPage={setPage} />
+          <div className={loadingPage ? "is-loading" : ""}>
+            <DataTable
+              columns={result.columns}
+              rows={view.rows}
+              firstIndex={(view.page - 1) * pageSize + 1}
+            />
+          </div>
+          {pageError && <ErrorAlert message={pageError} />}
+          <Pagination page={view.page} pages={pages} total={rowsLabel} onPage={loadPage} />
         </div>
       )}
 

@@ -6,31 +6,36 @@ Rexie answers questions **only from our own data**. It's one app with two produc
 
 | Product | Answers from | How | Status |
 |---|---|---|---|
-| **Product-1: RAG** (Retrieval-Augmented Generation) | Text documents | Finds the relevant passages, writes an answer and cites them | Complete |
-| **Product-2: Text-to-SQL** | SQLite databases | Confirms what you mean, writes SQL, checks it, runs it and shows the result | In progress |
+| **Product-1: Rexie Scribe** (RAG, Retrieval-Augmented Generation) | Your documents (PDF, Word, Markdown, text) | Finds the relevant passages in the documents you pick, writes an answer and cites them | Complete |
+| **Product-2: Rexie Scout** (Text-to-SQL) | SQLite databases | Confirms what you mean, writes SQL, checks it, runs it and shows the result | In progress |
 
 ## Contents
 
 - [Goal](#goal)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
-- [Product-1: RAG](#product-1-rag)
-- [Product-2: Text-to-SQL](#product-2-text-to-sql)
+- [Product-1: Rexie Scribe (RAG)](#product-1-rexie-scribe-rag)
+  - [Version-1: RAG Engine](#version-1-what-we-built)
+  - [Version-2: Your Sources](#version-2-your-sources)
+- [Product-2: Rexie Scout (Text-to-SQL)](#product-2-rexie-scout-text-to-sql)
   - [Version-1: Baseline](#version-1-baseline)
   - [Version-2: Database Descriptions](#version-2-database-descriptions)
   - [Version-3: Scaling to Large Databases](#version-3-scaling-to-large-databases)
   - [Version-4: Trustworthy SQL](#version-4-trustworthy-sql)
   - [Version-5: Confirm the Meaning First](#version-5-confirm-the-meaning-first)
   - [Version-6: Know Your Tables](#version-6-know-your-tables)
+  - [Version-7: Safety (Read-Only)](#version-7-safety-read-only)
+  - [Version-8: Performance (Heavy Queries)](#version-8-performance-heavy-queries)
 - [The App (UI)](#the-app-ui)
+- [Fixes](#fixes)
 - [Models](#models)
 
 ## Goal
 
 Build a personal, ChatGPT-like assistant that answers questions **only from the data we give it**: it finds the most relevant pieces of our data, reasons over them with an LLM, and shows what it used, so answers stay grounded instead of made up.
 
-- **RAG** does this over text documents: it retrieves passages and cites them.
-- **Text-to-SQL** does this over databases: it writes SQL, runs it, and shows the query and the result table.
+- **Rexie Scribe** (RAG) does this over documents: it retrieves passages and cites them.
+- **Rexie Scout** (Text-to-SQL) does this over databases: it writes SQL, runs it, and shows the query and the result table.
 
 ---
 
@@ -39,16 +44,18 @@ Build a personal, ChatGPT-like assistant that answers questions **only from the 
 ```
 multimodal-retrieval-engine/
 ├── backend/
-│   ├── main.py              # one FastAPI server for both products + serves the React app
-│   ├── config.py            # all API keys (read from .env) and model names
-│   ├── rag/                 # RAG
-│   │   ├── api.py           #   /api/rag/query, /api/rag/feedback
+│   ├── main.py              # one FastAPI server for both products + serves the React app (+ optional password)
+│   ├── config.py            # all API keys (read from .env), model names and limits
+│   ├── llm.py               # the one LLM client: time limit + retries for every call
+│   ├── rag/                 # Rexie Scribe (RAG)
+│   │   ├── api.py           #   /api/rag/... (query, feedback, documents)
+│   │   ├── documents.py     #   Version-2: list and upload documents (.txt .md .pdf .docx)
 │   │   ├── pipeline.py      #   encode → search → re-rank → answer
 │   │   ├── encoders/        #   text embeddings (all-mpnet-base-v2)
 │   │   ├── retrieval/       #   vector index + re-ranker
 │   │   ├── reasoning/       #   LLM answer with citations
 │   │   └── feedback/        #   thumbs up/down logger
-│   └── text_to_sql/         # Text-to-SQL
+│   └── text_to_sql/         # Rexie Scout (Text-to-SQL)
 │       ├── api.py           #   /api/sql/... (interpret, query, tables)
 │       ├── pipeline.py      #   question → tables → meaning → SQL → checks → result
 │       ├── sql_generator.py #   LLM writes the SQL
@@ -58,16 +65,19 @@ multimodal-retrieval-engine/
 │       ├── table_summaries.py # Version-3: LLM-written table summaries; Version-6: rewrites from corrections
 │       ├── checks.py        #   Version-4: deterministic checks before and after running SQL
 │       ├── interpreter.py   #   Version-5: up to 3 meanings of the question for the user to pick
+│       ├── safety.py        #   Version-7: blocks anything that could change a database
+│       ├── results.py       #   Version-8: recent results kept for paging (LRU cache)
 │       └── catalog.py       #   Version-6: table list (10 per page), adding a .sqlite database
 ├── frontend/                # React app (Vite)
 │   └── src/
-│       ├── tabs/            #   RagTab.jsx; TextToSqlTab.jsx = SqlTab.jsx (Ask) + TablesTab.jsx (Tables)
+│       ├── tabs/            #   ScribeTab = RagTab (Ask) + SourcesTab (Sources); ScoutTab = SqlTab (Ask) + TablesTab (Tables)
 │       ├── components/ui.jsx #  icons, loading, alerts, SQL highlighting, pager, data table
 │       └── styles.css       #   design tokens (light + dark), layout
 ├── data/
-│   ├── rag/                 # RAG: raw docs, built index, eval set
-│   └── text_to_sql/         # Text-to-SQL: one folder per database
+│   ├── rag/                 # Scribe: documents (raw_docs), built index, eval set
+│   └── text_to_sql/         # Scout: one folder per database
 │       └── retail_store/    #   practice DB, descriptions, 20 questions + answers
+├── tests/                   # pytest: the deterministic rules, no API key or LLM calls
 ├── scripts/
 │   ├── rag/                 # build the index, retrieval eval, RAGAS metrics
 │   └── text_to_sql/         # evaluate.py: execution accuracy on question sets
@@ -99,8 +109,8 @@ cp .env.example .env
 
 | Key | Used by | Required? |
 |---|---|---|
-| `GROQ_API_KEY` | RAG answers and Text-to-SQL | Yes ([get one](https://console.groq.com/keys)) |
-| `HF_TOKEN` | RAG's RAGAS evaluation scripts | Optional |
+| `GROQ_API_KEY` | Scribe answers and Scout | Yes ([get one](https://console.groq.com/keys)) |
+| `HF_TOKEN` | Scribe's RAGAS evaluation scripts | Optional |
 
 `.env` is git-ignored, so keys never reach GitHub.
 
@@ -116,7 +126,7 @@ cd frontend && npm install && npm run build && cd ..
 uvicorn backend.main:app --reload
 ```
 
-Open **http://localhost:8000** and pick a product: **RAG** or **Text-to-SQL** (with its **Ask** and **Tables** views).
+Open **http://localhost:8000** and pick a product: **Scribe** (views: **Ask**, **Sources**) or **Scout** (views: **Ask**, **Tables**).
 
 > **Editing the UI?** Run `npm run dev` inside `frontend/` and open http://localhost:5173 for instant reload (the backend must also be running).
 
@@ -124,18 +134,20 @@ Open **http://localhost:8000** and pick a product: **RAG** or **Text-to-SQL** (w
 
 | Task | Command |
 |---|---|
-| Rebuild the RAG index after changing docs | `python -m scripts.rag.build_index` |
+| Rebuild Scribe's whole index (after editing or deleting files by hand) | `python -m scripts.rag.build_index` |
 | Score Text-to-SQL on the practice questions | `python -m scripts.text_to_sql.evaluate` |
 | Check table picking only (no LLM calls) | `python -m scripts.text_to_sql.evaluate --retrieval-only` |
 | Compare with sending every table | `python -m scripts.text_to_sql.evaluate --full-schema` |
 | Summarize new/changed tables (LLM), then embed | `python -m scripts.text_to_sql.build_schema_index` |
 | Re-embed only, no LLM calls | `python -m scripts.text_to_sql.build_schema_index --skip-summaries` |
 | Run only some questions | `python -m scripts.text_to_sql.evaluate --ids 3,7,8` |
+| Run the tests (no API key, ~7 s) | `python -m pytest` |
+| Score Scout the way the app works (confirm the meaning first) | `python -m scripts.text_to_sql.evaluate --confirm` |
 | API docs (auto-generated) | http://localhost:8000/docs |
 
 ---
 
-## Product-1: RAG
+## Product-1: Rexie Scribe (RAG)
 
 ### Target
 
@@ -168,7 +180,8 @@ We used to store one line of a paragraph as one chunk. Now we split text into wo
 
 - **Chunk length:** too big captures more context but creates fewer, heavier chunks that mix topics; too small is more precise but can miss context.
 - **Overlap:** keeps ideas from being cut at chunk boundaries, at the cost of some redundancy.
-- **Result:** chunk length 80 with overlap 40 worked best.
+- **Result:** chunk length 80 with overlap 40 worked best in these early tests.
+- **Today:** the index uses **40 words with an overlap of 10** (`CHUNK_WORDS` / `CHUNK_OVERLAP` in `backend/rag/documents.py`, shared by uploads and `build_index`).
 
 #### Version-1.4: Two-Stage Retrieval (Re-Ranking)
 
@@ -271,11 +284,31 @@ Measured with RAGAS on 3 test questions:
 
 ### Conclusion
 
-The RAG engine works end to end, but its scores need improving: that's the next goal for RAG.
+The RAG engine works end to end, but its scores need improving: that's the next goal for Scribe.
 
 ---
 
-## Product-2: Text-to-SQL
+### Version-2: Your Sources
+
+Version-1 answered only from a few text notes put in a folder by hand, and filtering meant typing source names. Scribe is for asking about **your own documents**, so it now works like Scout's Tables view:
+
+**Sources view**
+- **Every document**, 10 per page, with search by name or content. Each shows its file, type tag (Text, Markdown, PDF, Word), number of passages and size.
+- Open a document to see **what Scribe searches**: the passages it was split into, 10 per page.
+- **Add documents**: upload `.txt`, `.md`, `.pdf` or `.docx` files (several at once). Each is read, split into passages, embedded and **searchable immediately, no restart**. Refused: other file types, a name that already exists, files over 50 MB, and PDFs with no text (scanned images).
+
+**Ask view**
+- **Search in:** a picker with **All documents** (default) or any number of chosen documents. Answers and citations come only from the chosen ones; if they don't contain the answer, Scribe says so.
+
+**Fix found along the way:** the LLM was only given the first **60 characters** of each passage (the short preview meant for the UI), so it answered from fragments. It now gets the **whole passage**; the UI preview is 200 characters.
+
+**Tested:** uploaded a Word file and a PDF → 2 and 1 passages; "What does the liver do?" with only the PDF selected → glycogen, bile, toxins, regrowth, cited from the PDF; the same question with only `heart_notes` selected → "the context does not contain any information about the liver". Wrong file type and duplicate name were refused. (The test files were removed afterwards.)
+
+New libraries: `pypdf` (PDF text) and `python-docx` (Word text), both free and local.
+
+---
+
+## Product-2: Rexie Scout (Text-to-SQL)
 
 ### Goal
 
@@ -315,6 +348,8 @@ Each version fixed a problem the previous one exposed.
 | **Version-4:** Trustworthy SQL | SQL can run and still be wrong | Deterministic checks, 3 tries compared by result, hard stop |
 | **Version-5:** Confirm the meaning | The model guessed what the question meant | The user picks from up to 3 meanings first |
 | **Version-6:** Know your tables | A wrong table description misleads every question | The user sees, fixes and adds tables |
+| **Version-7:** Safety | A question or the LLM's SQL could change the database | Deterministic write checks on the question, the meaning and the SQL |
+| **Version-8:** Performance | A heavy query can be slow or return huge results | Size estimate before running, time limit, 200-row limit, paging from a cache |
 
 ---
 
@@ -561,7 +596,7 @@ Tested in the UI too: after **None of these** with *"count cancelled orders too;
 
 ### Version-6: Know Your Tables
 
-Rexie finds tables by their LLM-written descriptions (Version-3). If a description is wrong, every question about that table starts from a wrong idea. Example: the `orders` description said cancelled orders should be left out when counting, which is exactly why #20 failed. So the user can now **see and fix what Rexie understands**, in the **Tables** view of Text-to-SQL.
+Rexie finds tables by their LLM-written descriptions (Version-3). If a description is wrong, every question about that table starts from a wrong idea. Example: the `orders` description said cancelled orders should be left out when counting, which is exactly why #20 failed. So the user can now **see and fix what Rexie understands**, in Scout's **Tables** view.
 
 #### The Tables view
 
@@ -589,13 +624,59 @@ Needs a fix ──> say what's wrong ──> Rexie rewrites it (1 LLM call)
 
 ---
 
+### Version-7: Safety (Read-Only)
+
+Scout is for **reading** data, never changing it. The LLM is probabilistic, so safety can't depend on it behaving: every check below is a **deterministic rule**, and a request that could write is stopped with *"This could be a potential write … rewrite it as a question"*. Nothing is run.
+
+| Check | When | How | LLM calls |
+|---|---|---|---|
+| **1. The question** | Before anything | Starts with a write verb ("delete", "update", "add", "set", "rename", "increase"…, after "please / can you / I want to"), or is SQL that the parser reads as a write | 0 |
+| **2. The meaning** | After the LLM reads the question | The LLM must describe a write honestly and flag it (`changes_data`); each meaning is also checked with rule 1 | 1 |
+| **3. The SQL** | After the SQL is written, before it's run | Read with the **sqlglot** parser. **Allow-list**: only one plain read query (`SELECT`, `WITH … SELECT`, `UNION`) passes. Blocks `INSERT`, `UPDATE`, `DELETE`, `DROP`, `CREATE`, `ALTER`, `REPLACE`, `PRAGMA`, `ATTACH`, `BEGIN`, `VACUUM`, `SELECT … INTO`, `load_extension()`, a second statement after `;`… | 0 |
+| **4. The database** | Always | Files are attached **read-only** and the connection refuses writes (`PRAGMA query_only`), so even a missed case can't change data | — |
+
+Unsafe SQL is a **hard stop**: no second round, no more LLM calls. The UI shows an amber **"Scout only reads data"** message.
+
+Why both rule 1 and rule 2: rule 1 is free but only sees the start of the request. "Show me the cancelled orders and then get rid of them" starts with "Show", so it needs the LLM's reading ("…then delete those rows"), which is then checked deterministically.
+
+**Tested** (no LLM for the rules): 17 write SQL statements blocked and 7 read queries passed, including traps like `WHERE status = 'deleted'`, `replace()` as a text function and a column named `update_date`; 12 write requests blocked and 10 read questions passed ("List deleted orders", "Which customers were added in 2026?", "Add up the revenue"). End to end: "Delete all cancelled orders" and `DELETE FROM …` blocked with 0 LLM calls; the "…get rid of them" question blocked after 1 call; an LLM forced to write `DELETE` was stopped after round 1, and `orders` still had all 50 rows.
+
+---
+
+### Version-8: Performance (Heavy Queries)
+
+Version-7 stops queries that could **change** data. This version stops queries that are **too heavy**: they read too much, run too long, or return more rows than anyone can use. Each layer is deterministic, and every limit is in `backend/config.py`.
+
+| Layer | When | How | Limit |
+|---|---|---|---|
+| **1. Size estimate** | Before running | SQLite's `EXPLAIN QUERY PLAN` gives steps, not row estimates, so the size is worked out from the steps and each table's row count: `SCAN` reads every row, a primary-key `SEARCH` ~1 row per lookup, an index `SEARCH` ~1%; steps at the same level are a join, so they multiply. Aliases (`SCAN o`) are mapped back to tables with sqlglot | 1,000,000 rows read |
+| **2. Time limit** | While running | SQLite has no per-query timeout, so a check runs every 10,000 steps of the query and stops it once the time is up. The clock starts when the query gets the connection, not while it waits its turn | 5 seconds |
+| **3. Row limit** | After running | Fetch 201 rows: keep 200, and if the 201st exists say *"Showing the first 200 rows; there are more. Narrow the question."* | 200 rows |
+| **4. Paging** | In the UI | The answer comes with page 1 (10 rows) and a result id; other pages are loaded when clicked, **without re-running the query** | 10 per page |
+| **5. Cache** | On the server | The 10 most recently used results (**LRU**: the least recently used is dropped). If a dropped result is opened again, its SQL is run once more (with the safety and time checks) | 10 results |
+
+If every try in a round is too big or too slow, Scout **stops** (no round 2, no more LLM calls) and the UI shows an amber **"Narrow it down"** message, e.g. *"This query could read about 6,250,000 rows (the limit is 1,000,000), so it wasn't run. Narrow it down, e.g. add a date range, a store or a category."*
+
+**Comparing the 3 tries, now by fingerprint.** Each result is compared as **(row count, fingerprint)**: every row is hashed, the hashes are sorted (so row order doesn't matter) and hashed together with SHA-256. Considered and rejected:
+- **Comparing only the top 25 rows:** saves microseconds (running the query is the slow part), but two different answers can share their first 25 rows (a false "agree", the #20 mistake) and two equal answers can order them differently (a false "disagree" costing 3 more LLM calls).
+- **A Bloom filter:** it's only certain when it says "different". When it says "same" it can be a false positive, which is the dangerous direction here. Bloom filters (and IBLTs) suit huge sets on different machines, not 200 rows in memory.
+
+**Checked:**
+- a 4-table cross join was estimated at 6,250,000 rows and not run
+- an endless query was stopped at the time limit, with each of 3 parallel tries getting its full time
+- a 2,500-row result was kept as 200 rows plus the "there are more" warning
+- page 10 (rows 181–200, with 20 per page at the time) loaded from the cache, and after the result was pushed out of the cache, page 2 was rebuilt once
+- the existing evaluation on 5 questions (#3, #7, #8, #19, #20) gave 4/5, the same as before (#20 needs the confirm-the-meaning step, which the script skips)
+
+---
+
 ## The App (UI)
 
 Both products share one React app, designed to look like a finished product instead of a demo:
 
 | Before | After |
 |---|---|
-| Plain page, browser-default inputs | App header with a product switch (**RAG** / **Text-to-SQL**); cards with consistent spacing and type (Inter) |
+| Plain page, browser-default inputs | App header with a product switch (**Scribe** / **Scout**), each with its own views; cards with consistent spacing and type (Inter) |
 | Status as plain text | Spinners while working, red/amber alert boxes for errors and warnings |
 | — | Empty state with **example questions** you can click |
 | Text-to-SQL flow implicit | **Step bar**: Ask → Confirm meaning → Answer |
@@ -603,9 +684,32 @@ Both products share one React app, designed to look like a finished product inst
 | One line of stats | Stat strip: rows, **confidence badge**, LLM calls, tables used |
 | Plain table | Sticky header, row numbers, numbers right-aligned, NULLs greyed out, 10 rows per page |
 | Plain SQL text | Syntax-coloured SQL with a **Copy** button; attempts in a collapsible list |
-| RAG citations as one line each | Citation cards with source, chunk id and a score bar; filters hidden behind "Filters (optional)" |
+| RAG citations as one line each | Citation cards with source, chunk id and a score bar; a **Search in** picker for documents |
 
 Also: a **theme switch** in the header (System / Light / Dark, remembered between visits) and a **phone layout** (no sideways scrolling). Checked in the browser in light, dark and phone sizes.
+
+---
+
+## Fixes
+
+A review of everything built so far turned up gaps that weren't new features but holes. These are the fixes.
+
+| Gap | Fix | Where |
+|---|---|---|
+| **No tests**: every check was a one-off script | **66 `pytest` tests** for every deterministic rule: safety (write SQL and write requests blocked, reads passed, the database refusing writes), performance (size estimates, time limit, row limit, connection pool), fingerprints, the LRU cache, document chunking, add/delete (on a temporary folder), prompt-injection detection and the app password. No API key, no LLM calls, ~7 seconds | `tests/` |
+| **Evaluation didn't match the app**: it skipped confirming the meaning, so #20 always failed there | `--confirm`: gets the meanings and picks the one closest (embeddings) to what the question intends (its `trap` note), like a user would. On #20 it picked "count every order, keep ties" and Scout wrote the right logic with high confidence. Still scored FAIL because the scoring is strict about columns (extra `store_id`/`employee_id`, split names), as for #16/#17 | `scripts/text_to_sql/evaluate.py` |
+| **LLM calls could hang or fail**: no time limit, no retry (a 429 rate limit once wasted a call) | One client for every call: **30 s time limit, 3 retries** with backoff on rate limits, server errors, timeouts and dropped connections | `backend/llm.py`, `config.py` |
+| **Data sent to Groq wasn't documented** | `SHARE_ROWS_WITH_LLM` (default on). Off → Scout never sends data rows: no sample rows for table descriptions, only row counts in the disagreement feedback. What's sent: Scout sends the question, schema and descriptions (+ rows when on); Scribe always sends the passages it answers from, since that's how RAG works | `config.py` |
+| **Prompt injection**: an uploaded document could steer Scribe's answers | Passages are fenced in `<documents>` and the model is told they're data, never instructions; a passage can't close the fence. Uploads with instruction-like text ("ignore previous instructions", "you are now"…) get a warning. (Scout was already safe: writes are blocked by deterministic rules whatever the model is told) | `llm_reasoner.py`, `documents.py` |
+| **Scribe documents couldn't be removed** | **Remove document** (with a confirm): deletes the file and its passages and vectors from the index | Sources view |
+| **Scribe's 👍/👎 feedback was lost in the redesign** | Back under every answer, logged to `data/rag/feedback/` (now git-ignored: it contains users' questions) | Ask view |
+| **README said 80-word chunks; the code uses 40/10** | README corrected (Version-1.3) | — |
+| **Scout databases couldn't be removed** | **Remove database** (with a confirm): deletes its folder (file, descriptions, summaries, embeddings) and reloads. Only a database in its own folder inside `data/text_to_sql/` | Tables view |
+| **No follow-up questions** ("now sort that by city") | **Follow up on "…"** toggle after an answer: the earlier question, meaning and SQL go into the context, and help pick the tables | Ask view |
+| **One slow query blocked everyone** (one shared connection) | A pool of **4 read-only connections**: two queries stopped at their time limit while two fast ones finished in 0.00 s instead of waiting | `database.py` |
+| **No login** | Optional `APP_PASSWORD` in `.env`: the browser asks for it before anything loads (HTTP Basic). Empty = no login, fine on your own machine | `main.py`, `.env.example` |
+
+**Not done (bigger than a fix):** running **BIRD** for Scout and **raising Scribe's RAGAS scores** are the next projects, not gaps.
 
 ---
 
@@ -613,12 +717,12 @@ Also: a **theme switch** in the header (System / Light / Dark, remembered betwee
 
 | Product | Role | Model | Where |
 |---|---|---|---|
-| RAG | Embeddings | `all-mpnet-base-v2` | Local (sentence-transformers) |
-| RAG | Answer writing | `openai/gpt-oss-20b` | Groq |
-| Text-to-SQL | SQL generation (Version-1) | `openai/gpt-oss-120b` | Groq |
-| Text-to-SQL | Table summaries, offline (Version-3) | `openai/gpt-oss-120b` | Groq |
-| Text-to-SQL | Table search embeddings (Version-3) | `all-mpnet-base-v2` (shared with RAG) | Local (sentence-transformers) |
-| Text-to-SQL | Meanings of the question (Version-5) | `openai/gpt-oss-120b` | Groq |
-| Text-to-SQL | Rewriting a table description from the user's corrections (Version-6) | `openai/gpt-oss-120b` | Groq |
+| Scribe | Embeddings | `all-mpnet-base-v2` | Local (sentence-transformers) |
+| Scribe | Answer writing | `openai/gpt-oss-20b` | Groq |
+| Scout | SQL generation (Version-1) | `openai/gpt-oss-120b` | Groq |
+| Scout | Table summaries, offline (Version-3) | `openai/gpt-oss-120b` | Groq |
+| Scout | Table search embeddings (Version-3) | `all-mpnet-base-v2` (shared with Scribe) | Local (sentence-transformers) |
+| Scout | Meanings of the question (Version-5) | `openai/gpt-oss-120b` | Groq |
+| Scout | Rewriting a table description from the user's corrections (Version-6) | `openai/gpt-oss-120b` | Groq |
 
 Model names are set in `backend/config.py`. To see which models your Groq key can use, check the [Groq models page](https://console.groq.com/docs/models).

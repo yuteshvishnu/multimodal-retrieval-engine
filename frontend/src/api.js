@@ -26,3 +26,13 @@ export async function getJson(url, params = {}) {
   const query = new URLSearchParams(params).toString();
   return handle(await fetch(query ? `${url}?${query}` : url));
 }
+
+export async function postJson(url, payload) {
+  return handle(
+    await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+  );
+}
+
+export async function deleteJson(url) {
+  return handle(await fetch(url, { method: "DELETE" }));
+}

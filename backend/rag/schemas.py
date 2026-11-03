@@ -7,6 +7,7 @@ class RetrievedChunk(BaseModel):
     score: float
     source: str
     snippet: str
+    text: Optional[str] = None  # the whole chunk
 
 
 class QueryResponse(BaseModel):

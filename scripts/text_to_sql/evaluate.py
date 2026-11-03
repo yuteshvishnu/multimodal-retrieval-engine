@@ -13,6 +13,7 @@ Run from the project root:
     python -m scripts.text_to_sql.evaluate --k 3               # try a different top-k
     python -m scripts.text_to_sql.evaluate --full-schema       # versions 1-2: send all tables
     python -m scripts.text_to_sql.evaluate --ids 3,7,8         # only these questions
+    python -m scripts.text_to_sql.evaluate --confirm           # the app's flow: confirm the meaning first
     python -m scripts.text_to_sql.evaluate --questions path/to/questions.json
 """
 import argparse
@@ -21,6 +22,9 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
+import numpy as np
+
+from backend.rag.encoders.text_encoder import get_text_encoder
 from backend.text_to_sql.pipeline import TOP_K_TABLES, TextToSQLPipeline
 
 DEFAULT_QUESTIONS = Path("data/text_to_sql/retail_store/questions.json")
@@ -36,6 +40,22 @@ def tables_in(sql, table_names):
     return {name for name in table_names if re.search(rf"\b{re.escape(name)}\b", sql, re.IGNORECASE)}
 
 
+def pick_meaning(options, q):
+    """
+    Plays the user in the confirm-the-meaning step (Version-5): picks the option closest in
+    meaning (embeddings) to what the question intends, i.e. its "trap" note when it has one.
+    A stand-in for a person, so a wrong pick here is a limit of the simulation, not of Scout.
+    """
+    if len(options) == 1:
+        return options[0]
+    encoder = get_text_encoder()
+    target = encoder.encode(f"{q['question']} {q.get('trap', '')}")
+    texts = [o["meaning"] + " " + " ".join(o["choices"]) for o in options]
+    scores = [float(np.dot(target, v) / (np.linalg.norm(target) * np.linalg.norm(v) + 1e-8))
+              for v in (encoder.encode(t) for t in texts)]
+    return options[int(np.argmax(scores))]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--questions", type=Path, default=DEFAULT_QUESTIONS)
@@ -43,6 +63,8 @@ def main():
     parser.add_argument("--full-schema", action="store_true", help="send every table (no table search)")
     parser.add_argument("--retrieval-only", action="store_true", help="only score table picking; no LLM calls")
     parser.add_argument("--ids", help="comma-separated question ids to run, e.g. 3,7,8")
+    parser.add_argument("--confirm", action="store_true",
+                        help="like the app: get the meanings, pick one (simulated user), then write SQL")
     args = parser.parse_args()
 
     questions = json.loads(args.questions.read_text(encoding="utf-8"))
@@ -70,10 +92,21 @@ def main():
                 print(f"  Missing: {sorted(missing)}")
             continue
 
-        result = pipeline.run(q["question"])
+        meaning, interpret_calls = "", 0
+        if args.confirm:
+            interpreted = pipeline.interpret(q["question"])
+            interpret_calls = interpreted.get("llm_calls", 0)
+            if interpreted.get("options"):
+                picked_option = pick_meaning(interpreted["options"], q)
+                meaning = "\n".join([picked_option["meaning"]] + [f"- {c}" for c in picked_option["choices"]])
+        result = pipeline.run(q["question"], meaning)
+        result["llm_calls"] = result.get("llm_calls", 0) + interpret_calls
         _, gold_rows = pipeline.database.run(q["gold_sql"])
+        # the response holds only page 1; compare every row kept for the result
+        saved = pipeline.results.get(result["result_id"]) if result.get("result_id") else None
+        rows = saved["rows"] if saved else result.get("rows", [])
 
-        ok = not result.get("error") and as_set(result.get("rows", [])) == as_set(gold_rows)
+        ok = not result.get("error") and as_set(rows) == as_set(gold_rows)
         correct += ok
         by_difficulty[q["difficulty"]][0] += ok
         by_difficulty[q["difficulty"]][1] += 1
@@ -83,6 +116,8 @@ def main():
         mark = "PASS" if ok else "FAIL"
         print(f"\n[{mark}] #{q['id']} ({q['difficulty']}) {q['question']}")
         print(f"  Confidence: {result.get('confidence')}, LLM calls: {result.get('llm_calls', 0)}")
+        if meaning:
+            print(f"  Meaning:   {meaning.splitlines()[0]}")
         for warning in result.get("warnings", []):
             print(f"  Warning:   {warning}")
         if not ok:
@@ -92,7 +127,7 @@ def main():
             if result.get("error"):
                 print(f"  Error:     {result['error']}")
             else:
-                print(f"  Model got: {result.get('rows', [])[:5]}")
+                print(f"  Model got: {rows[:5]}")
             print(f"  Gold SQL:  {q['gold_sql']}")
             print(f"  Expected:  {gold_rows[:5]}")
             if q.get("trap"):

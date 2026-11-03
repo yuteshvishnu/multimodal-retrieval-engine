@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./components/ui.jsx";
-import RagTab from "./tabs/RagTab.jsx";
-import TextToSqlTab from "./tabs/TextToSqlTab.jsx";
+import ScoutTab from "./tabs/ScoutTab.jsx";
+import ScribeTab from "./tabs/ScribeTab.jsx";
 
 // Rexie's two products
 const TABS = [
-  { id: "rag", label: "RAG", icon: "doc" },
-  { id: "sql", label: "Text-to-SQL", icon: "database" },
+  { id: "rag", label: "Scribe", hint: "Rexie Scribe: ask your documents (RAG)", icon: "doc" },
+  { id: "sql", label: "Scout", hint: "Rexie Scout: ask your data (Text-to-SQL)", icon: "database" },
 ];
 
 const THEMES = [
@@ -56,6 +56,7 @@ export default function App() {
                   key={tab.id}
                   className={tab.id === active ? "tab active" : "tab"}
                   onClick={() => setActive(tab.id)}
+                  title={tab.hint}
                 >
                   <Icon name={tab.icon} size={14} />
                   {tab.label}
@@ -84,10 +85,10 @@ export default function App() {
       <main className="page">
         {/* both stay mounted, so switching tabs keeps each tab's results */}
         <div hidden={active !== "rag"}>
-          <RagTab />
+          <ScribeTab />
         </div>
         <div hidden={active !== "sql"}>
-          <TextToSqlTab />
+          <ScoutTab />
         </div>
       </main>
     </>

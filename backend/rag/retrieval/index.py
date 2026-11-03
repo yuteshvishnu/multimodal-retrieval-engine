@@ -106,13 +106,14 @@ class VectorIndex:
         for doc_id, score, doc in sims[:top_k]:
             print(f"[VectorIndex] Retrieved doc_id={doc_id}, score={score}")
             norm_score = float(normalize(score))
-            snippet = doc["text"][:60].replace("\n", " ")
+            snippet = doc["text"][:200].replace("\n", " ")
 
             entry = {
                 "id": doc_id,
                 "score": norm_score,
                 "source": doc.get("source", "text_corpus"), # text_corpus is the default value
-                "snippet": snippet,
+                "snippet": snippet,  # shown in the UI
+                "text": doc["text"],  # the whole chunk, for re-ranking and the LLM
             }
 
             fallback_results.append(entry)

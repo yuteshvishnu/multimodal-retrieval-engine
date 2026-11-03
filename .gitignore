@@ -24,3 +24,6 @@ frontend/dist/
 
 # macOS
 .DS_Store
+
+# Scribe answer feedback (contains users' questions)
+data/rag/feedback/

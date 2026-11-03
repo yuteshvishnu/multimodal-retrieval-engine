@@ -377,29 +377,8 @@ textarea::placeholder,
   color: var(--accent);
 }
 
-.filters-toggle {
-  margin-top: 12px;
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: 12.5px;
-  color: var(--text-3);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
 
-.filters-toggle:hover {
-  color: var(--text);
-}
 
-.filters {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 12px;
-}
 
 .field {
   display: flex;
@@ -603,6 +582,16 @@ textarea:focus {
   background: var(--danger-soft);
   color: var(--danger);
   border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
+.alert-safety strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.alert-safety p {
+  margin: 0;
+  color: var(--text-2);
 }
 
 .alert-warning {
@@ -1193,12 +1182,222 @@ td.null {
   transition: opacity 0.15s;
 }
 
+.is-loading {
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+
 .preview-table.is-loading {
   opacity: 0.5;
 }
 
 .preview-table .table-wrap {
   border-radius: 0;
+}
+
+/* ---------- Scribe: document picker ---------- */
+.picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.picker-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 10px 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.picker-button:hover {
+  border-color: var(--accent);
+}
+
+.picker-caret {
+  display: inline-flex;
+  color: var(--text-3);
+  transform: rotate(90deg);
+  transition: transform 0.15s;
+}
+
+.picker-caret.open {
+  transform: rotate(-90deg);
+}
+
+.picker-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: min(340px, calc(100vw - 48px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+  padding: 6px;
+}
+
+.picker-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.picker-option:hover {
+  background: var(--surface-2);
+}
+
+.picker-option input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.picker-all {
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  border-radius: 8px 8px 0 0;
+  margin-bottom: 4px;
+}
+
+.picker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.picker-search {
+  width: 100%;
+  height: 34px;
+  margin: 2px 0 4px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  outline: none;
+}
+
+.picker-list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.picker-empty {
+  padding: 8px 10px;
+  margin: 0;
+}
+
+.picker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 4px 2px 10px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+/* ---------- Scribe: passages of a document ---------- */
+.passages {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: opacity 0.15s;
+}
+
+.passages.is-loading {
+  opacity: 0.5;
+}
+
+.passage {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.passage:last-of-type {
+  border-bottom: none;
+}
+
+/* ---------- removing a document / database ---------- */
+.danger-zone {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.btn-danger {
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+
+/* ---------- Scout: follow-up toggle ---------- */
+.followup {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  margin-top: 12px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.followup span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.followup.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* ---------- Scribe: answer feedback ---------- */
+.feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 12.5px;
 }
 
 /* ---------- pagination ---------- */
@@ -1283,9 +1482,6 @@ section > .pagination {
     flex: none;
   }
 
-  .filters {
-    grid-template-columns: 1fr;
-  }
 
   .stats {
     grid-template-columns: 1fr 1fr;

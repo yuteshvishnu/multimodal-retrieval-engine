@@ -9,6 +9,7 @@ each check is a plain rule over the question, the SQL, or the result.
     result_signature    to compare two answers by their results, not their SQL text
     explain_disagreement  when answers differ: where their SQL differs (read with the sqlglot parser)
 """
+import hashlib
 import re
 import sqlite3
 from datetime import date, datetime
@@ -16,6 +17,8 @@ from typing import Dict, List, Optional, Tuple
 
 import sqlglot
 from sqlglot import exp
+
+from backend.config import SHARE_ROWS_WITH_LLM
 
 # columns with at most this many distinct values are treated as categories
 MAX_CATEGORY_VALUES = 20
@@ -221,9 +224,24 @@ def check_result(question: str, sql: str, columns: List[str], rows: List[list], 
     return _unique(warnings)
 
 
-def result_signature(rows: List[list]) -> frozenset:
-    """Two answers agree if they return the same rows (order and column names ignored)."""
-    return frozenset(tuple(round(v, 4) if isinstance(v, float) else v for v in row) for row in rows)
+def describe_rows(rows: List[list]) -> str:
+    """What the LLM is told about a result: the first rows, or only the count if rows aren't shared."""
+    if not SHARE_ROWS_WITH_LLM:
+        return f"{len(rows)} rows (values not shared)"
+    return f"{rows[:3]}{' ...' if len(rows) > 3 else ''}"
+
+
+def result_signature(rows: List[list]) -> Tuple[int, str]:
+    """
+    Two answers agree if they return the same rows (order and column names ignored).
+    Version-8: compared as (row count, fingerprint): each row is hashed, the hashes are
+    sorted (so row order doesn't matter) and hashed together. Exact up to a SHA-256 collision.
+    """
+    row_hashes = sorted(
+        hashlib.sha256(repr(tuple(round(v, 4) if isinstance(v, float) else v for v in row)).encode()).hexdigest()
+        for row in rows
+    )
+    return len(rows), hashlib.sha256("".join(row_hashes).encode()).hexdigest()
 
 
 # ---------- when attempts disagree: say exactly how ----------
@@ -266,8 +284,7 @@ def explain_disagreement(attempts: List[dict], tables: List[dict]) -> str:
 
     out = ["The earlier attempts disagreed. Here is exactly how:"]
     for i, a in enumerate(ok, 1):
-        preview = a["rows"][:3]
-        out.append(f"- attempt {i} returned {preview}{' ...' if len(a['rows']) > 3 else ''}")
+        out.append(f"- attempt {i} returned {describe_rows(a['rows'])}")
     out += lines
 
     notes = _column_notes(columns, tables, set().union(*(p["tables"] for p in parts)))

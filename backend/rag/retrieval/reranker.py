@@ -39,7 +39,7 @@ class ReRanker:
         query_terms = set(query_text.lower().split())
 
         def extra_signal(c: Dict) -> tuple[int, float]:
-            snippet = c.get("snippet", "").lower()
+            snippet = c.get("text", c.get("snippet", "")).lower()
             term_hits = sum(1 for t in query_terms if t in snippet)
             base_score = float(c.get("score", 0.0))
             return term_hits, base_score

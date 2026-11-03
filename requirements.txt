@@ -8,10 +8,17 @@ python-dotenv
 # LLM (Groq, via the OpenAI-compatible API)
 openai
 
-# Version-4: reads SQL into its parts, to compare the model's attempts (free, no model)
+# Scout (Text-to-SQL) Version-4: reads SQL into its parts, to compare the model's attempts (free, no model)
 sqlglot
 
-# Version-1: RAG
+# RAG (Rexie Scribe)
 numpy
 torch
 sentence-transformers
+
+# Scribe: reading uploaded PDF and Word files
+pypdf
+python-docx
+
+# Tests (python -m pytest): no API key or LLM calls needed
+pytest

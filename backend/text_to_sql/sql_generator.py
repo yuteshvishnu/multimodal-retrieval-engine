@@ -1,9 +1,9 @@
 import re
 import threading
 
-from openai import OpenAI
+from backend.llm import make_client
 
-from backend.config import GROQ_API_KEY, GROQ_BASE_URL, GROQ_MODEL_SQL
+from backend.config import GROQ_API_KEY, GROQ_MODEL_SQL
 
 
 SYSTEM_PROMPT = (
@@ -70,10 +70,7 @@ class SQLGenerator:
 
         # created on first use, so the server can start without a key
         if self.client is None:
-            self.client = OpenAI(
-                base_url=GROQ_BASE_URL,
-                api_key=self.api_key,
-            )
+            self.client = make_client(self.api_key)
 
         prompt = f"Schema:\n{schema}\n\n"
         if context:

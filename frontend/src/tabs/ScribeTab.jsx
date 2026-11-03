@@ -1,20 +1,21 @@
 import { useState } from "react";
 import { Icon } from "../components/ui.jsx";
-import SqlTab from "./SqlTab.jsx";
-import TablesTab from "./TablesTab.jsx";
+import RagTab from "./RagTab.jsx";
+import SourcesTab from "./SourcesTab.jsx";
 
 const VIEWS = [
   { id: "ask", label: "Ask", icon: "search" },
-  { id: "tables", label: "Tables", icon: "table" },
+  { id: "sources", label: "Sources", icon: "doc" },
 ];
 
-// Text-to-SQL: ask questions about the data, and see (and fix) the tables Rexie queries.
-export default function TextToSqlTab() {
+// Rexie Scribe (RAG): ask questions about your documents, and see and add the documents it answers from.
+export default function ScribeTab() {
   const [view, setView] = useState("ask");
+  const [refreshKey, setRefreshKey] = useState(0); // bumps when a document is added
 
   return (
     <>
-      <nav className="subnav" aria-label="Text-to-SQL">
+      <nav className="subnav" aria-label="Rexie Scribe">
         {VIEWS.map((v) => (
           <button
             key={v.id}
@@ -30,10 +31,10 @@ export default function TextToSqlTab() {
 
       {/* both stay mounted, so switching keeps each view's state */}
       <div hidden={view !== "ask"}>
-        <SqlTab />
+        <RagTab refreshKey={refreshKey} />
       </div>
-      <div hidden={view !== "tables"}>
-        <TablesTab />
+      <div hidden={view !== "sources"}>
+        <SourcesTab onAdded={() => setRefreshKey((k) => k + 1)} />
       </div>
     </>
   );

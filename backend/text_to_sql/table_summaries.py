@@ -29,9 +29,9 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from openai import OpenAI
+from backend.llm import make_client
 
-from backend.config import GROQ_API_KEY, GROQ_BASE_URL, GROQ_MODEL_SUMMARY
+from backend.config import GROQ_MODEL_SUMMARY, SHARE_ROWS_WITH_LLM
 
 SUMMARY_FILE = "table_summaries.json"
 SAMPLE_ROWS = 5
@@ -120,7 +120,7 @@ def problems_in(summary: str, table: dict, all_names: List[str]) -> List[str]:
 class TableSummarizer:
     def __init__(self, database):
         self.database = database
-        self.client = OpenAI(base_url=GROQ_BASE_URL, api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+        self.client = make_client()
 
     def build(self, rebuild: bool = False, folders: Optional[List[Path]] = None) -> None:
         """Summarizes new or changed tables in every database (or only in `folders`) and saves them."""
@@ -216,6 +216,8 @@ class TableSummarizer:
         return prompt
 
     def _sample_rows(self, table: dict) -> str:
+        if not SHARE_ROWS_WITH_LLM:
+            return "(not shared: SHARE_ROWS_WITH_LLM is off, so describe the table from its schema only)"
         try:
             columns, rows = self.database.run(
                 f'SELECT * FROM "{table["database"]}"."{table["name"]}" LIMIT {SAMPLE_ROWS}'

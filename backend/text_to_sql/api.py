@@ -1,5 +1,6 @@
 import json
 import shutil
+from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from backend.text_to_sql.catalog import PAGE_SIZE, check_new_tables, list_tables, save_upload
@@ -17,14 +18,32 @@ MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
 
 @router.post("/interpret", response_model=InterpretResponse)
-def interpret_endpoint(query_text: str = Form(""), history: str = Form("[]")):
-    """Version-5: up to 3 meanings of the question. history = JSON list of rejected rounds."""
-    return pipeline.interpret(query_text, json.loads(history))
+def interpret_endpoint(query_text: str = Form(""), history: str = Form("[]"), previous: str = Form("")):
+    """
+    Version-5: up to 3 meanings of the question. history = JSON list of rejected rounds.
+    previous = JSON {question, meaning, sql} of the answer this follows up on (optional).
+    """
+    return pipeline.interpret(query_text, json.loads(history), _previous(previous))
 
 
 @router.post("/query", response_model=QueryResponse)
-def query_endpoint(query_text: str = Form(""), meaning: str = Form("")):
-    return pipeline.run(query_text, meaning)
+def query_endpoint(query_text: str = Form(""), meaning: str = Form(""), previous: str = Form("")):
+    return pipeline.run(query_text, meaning, _previous(previous))
+
+
+def _previous(text: str):
+    """The earlier answer a follow-up refers to, or None."""
+    try:
+        data = json.loads(text) if text else None
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+@router.get("/results/{result_id}")
+def result_page_endpoint(result_id: str, page: int = 1):
+    """Version-8: one page (10 rows) of a saved result, without running the query again."""
+    return pipeline.result_page(result_id, page)
 
 
 # ---------- Version-6: the Tables view ----------
@@ -78,6 +97,23 @@ def save_endpoint(database: str, name: str, description: str = Form(...), feedba
     save_summary(table, " ".join(description.split()), [c for c in json.loads(feedback) if c.strip()])
     pipeline.reload()
     return {"table": list_tables([pipeline.find_table(database, name)], 1)["items"][0]}
+
+
+@router.delete("/databases/{database}")
+def delete_database_endpoint(database: str):
+    """
+    Removes a database: its folder (the .sqlite file, descriptions, summaries, embeddings),
+    then reloads. Only a database in its own folder inside the data folder can be removed.
+    """
+    folder = next((Path(t["folder"]) for t in pipeline.tables if t["database"] == database), None)
+    if folder is None:
+        raise HTTPException(404, f"No database called '{database}'.")
+    data_dir, folder = pipeline.database.data_dir.resolve(), folder.resolve()
+    if folder == data_dir or not folder.is_relative_to(data_dir) or len(list(folder.glob("*.sqlite"))) != 1:
+        raise HTTPException(400, "This database shares its folder with other files, so it can't be removed here.")
+    shutil.rmtree(folder)
+    pipeline.reload()
+    return {"deleted": database}
 
 
 @router.post("/tables/upload")
