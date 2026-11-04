@@ -12,7 +12,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from ragas.run_config import RunConfig
 from ragas.metrics import AnswerRelevancy
 
-# loads HF_TOKEN and GROQ_API_KEY from .env into os.environ
+# loads HF_TOKEN and the LLM API keys from .env into os.environ
 import backend.config  # noqa: F401
 
 # --- SETTINGS ---

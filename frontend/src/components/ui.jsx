@@ -33,6 +33,7 @@ const ICONS = {
   flag: <path d="M5 21V4M5 4h11l-2 4 2 4H5" />,
   agent: <><rect x="4" y="8" width="16" height="12" rx="3" /><path d="M12 4v4M9 13v1.5M15 13v1.5M9.5 17.5h5M2 13v3M22 13v3" /><circle cx="12" cy="3" r="1" /></>,
   x: <path d="M6 6l12 12M18 6 6 18" />,
+  target: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" /></>,
   arch: <><rect x="3" y="3" width="7" height="5" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="8.5" y="16" width="7" height="5" rx="1" /><path d="M6.5 8v3.5h11V8M12 11.5V16" /></>,
 };
 
@@ -60,6 +61,32 @@ export function Loading({ text }) {
       <span className="spinner" />
       {text}
     </div>
+  );
+}
+
+// A score as a ring: the filled arc is the share right (Evaluation, Version-13). No value: an empty ring.
+export function AccuracyRing({ value, size = 28, stroke = 4, children }) {
+  const r = (size - stroke) / 2;
+  const length = 2 * Math.PI * r;
+  const filled = value == null ? 0 : Math.max(0, Math.min(100, value)) / 100;
+  return (
+    <span className="ring" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+        <circle className="ring-track" cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} fill="none" />
+        <circle
+          className="ring-value"
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          strokeWidth={stroke}
+          fill="none"
+          strokeDasharray={`${filled * length} ${length}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          strokeLinecap="round"
+        />
+      </svg>
+      {children && <span className="ring-label">{children}</span>}
+    </span>
   );
 }
 

@@ -1,0 +1,1035 @@
+{
+ "benchmark": "BIRD dev",
+ "sample": true,
+ "note": "40 made-up questions in BIRD's format, used to build this page. A real BIRD run replaces it.",
+ "run_at": "2026-11-03T10:00:00",
+ "model": "openai/gpt-oss-120b",
+ "mode": "No user: the first meaning and the steps are accepted as written",
+ "results": [
+  {
+   "id": "S01",
+   "db_id": "california_schools",
+   "difficulty": "simple",
+   "question": "How many schools in Alameda County are charter schools?",
+   "evidence": "charter school refers to Charter = 1",
+   "gold_sql": "SELECT COUNT(*) FROM schools WHERE County = 'Alameda' AND Charter = 1",
+   "sql": "SELECT COUNT(*) FROM schools WHERE County = 'Alameda' AND Charter = 1",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     47
+    ]
+   ],
+   "rows": [
+    [
+     47
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.00177
+  },
+  {
+   "id": "S02",
+   "db_id": "california_schools",
+   "difficulty": "simple",
+   "question": "What is the phone number of the school with the highest average math SAT score?",
+   "evidence": "",
+   "gold_sql": "SELECT s.Phone FROM satscores sc JOIN schools s ON s.CDSCode = sc.cds ORDER BY sc.AvgScrMath DESC LIMIT 1",
+   "sql": "SELECT s.Phone FROM satscores sc JOIN schools s ON s.CDSCode = sc.cds ORDER BY sc.AvgScrMath DESC LIMIT 1",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     "(510) 555-0142"
+    ]
+   ],
+   "rows": [
+    [
+     "(510) 555-0142"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.002
+  },
+  {
+   "id": "S03",
+   "db_id": "california_schools",
+   "difficulty": "moderate",
+   "question": "Which county has the most schools that offer online-only classes?",
+   "evidence": "online-only refers to Virtual = 'F'",
+   "gold_sql": "SELECT County FROM schools WHERE Virtual = 'F' GROUP BY County ORDER BY COUNT(*) DESC LIMIT 1",
+   "sql": "SELECT County FROM schools WHERE Virtual = 'Y' GROUP BY County ORDER BY COUNT(*) DESC LIMIT 1",
+   "correct": false,
+   "outcome": "wrong rows",
+   "error": null,
+   "expected_rows": [
+    [
+     "Los Angeles"
+    ]
+   ],
+   "rows": [
+    [
+     "San Diego"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 8,
+   "cost": 0.00253
+  },
+  {
+   "id": "S04",
+   "db_id": "california_schools",
+   "difficulty": "moderate",
+   "question": "List the names of schools whose free-meal rate for ages 5-17 is above 0.8.",
+   "evidence": "rate = Free Meal Count (Ages 5-17) / Enrollment (Ages 5-17)",
+   "gold_sql": "SELECT `School Name` FROM frpm WHERE `Free Meal Count (Ages 5-17)` / `Enrollment (Ages 5-17)` > 0.8",
+   "sql": "SELECT `School Name` FROM frpm WHERE `Free Meal Count (Ages 5-17)` / `Enrollment (Ages 5-17)` > 0.8",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     "Oakland High"
+    ],
+    [
+     "Fremont Elementary"
+    ]
+   ],
+   "rows": [
+    [
+     "Oakland High"
+    ],
+    [
+     "Fremont Elementary"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.0016
+  },
+  {
+   "id": "S05",
+   "db_id": "financial",
+   "difficulty": "simple",
+   "question": "How many accounts were opened in 1995?",
+   "evidence": "",
+   "gold_sql": "SELECT COUNT(*) FROM account WHERE strftime('%Y', date) = '1995'",
+   "sql": "SELECT COUNT(*) FROM account WHERE strftime('%Y', date) = '1995'",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     1209
+    ]
+   ],
+   "rows": [
+    [
+     1209
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 6,
+   "cost": 0.00202
+  },
+  {
+   "id": "S06",
+   "db_id": "financial",
+   "difficulty": "simple",
+   "question": "How many clients are women?",
+   "evidence": "women refers to gender = 'F'",
+   "gold_sql": "SELECT COUNT(*) FROM client WHERE gender = 'F'",
+   "sql": "SELECT COUNT(*) FROM client WHERE gender = 'F'",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     2724
+    ]
+   ],
+   "rows": [
+    [
+     2724
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 6,
+   "cost": 0.00241
+  },
+  {
+   "id": "S07",
+   "db_id": "financial",
+   "difficulty": "moderate",
+   "question": "What is the average loan amount for accounts in the Prague district?",
+   "evidence": "",
+   "gold_sql": "SELECT AVG(l.amount) FROM loan l JOIN account a ON a.account_id = l.account_id JOIN district d ON d.district_id = a.district_id WHERE d.A2 = 'Hl.m. Praha'",
+   "sql": "SELECT AVG(l.amount) FROM loan l JOIN account a ON a.account_id = l.account_id JOIN district d ON d.district_id = a.district_id WHERE d.A2 = 'Hl.m. Praha'",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     153256.4
+    ]
+   ],
+   "rows": [
+    [
+     153256.4
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.0019
+  },
+  {
+   "id": "S08",
+   "db_id": "financial",
+   "difficulty": "challenging",
+   "question": "Which district had the biggest increase in unemployment rate from 1995 to 1996?",
+   "evidence": "A12 = rate in 1995, A13 = rate in 1996",
+   "gold_sql": "SELECT A2 FROM district ORDER BY (A13 - A12) DESC LIMIT 1",
+   "sql": "SELECT A2 FROM district ORDER BY A13 DESC LIMIT 1",
+   "correct": false,
+   "outcome": "wrong rows",
+   "error": null,
+   "expected_rows": [
+    [
+     "Kladno"
+    ]
+   ],
+   "rows": [
+    [
+     "Karvina"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 8,
+   "cost": 0.00283
+  },
+  {
+   "id": "S09",
+   "db_id": "toxicology",
+   "difficulty": "simple",
+   "question": "How many molecules are carcinogenic?",
+   "evidence": "carcinogenic refers to label = '+'",
+   "gold_sql": "SELECT COUNT(*) FROM molecule WHERE label = '+'",
+   "sql": "SELECT COUNT(*) FROM molecule WHERE label = '+'",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     152
+    ]
+   ],
+   "rows": [
+    [
+     152
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.00186
+  },
+  {
+   "id": "S10",
+   "db_id": "toxicology",
+   "difficulty": "moderate",
+   "question": "Which element appears most often in molecule TR004?",
+   "evidence": "",
+   "gold_sql": "SELECT element FROM atom WHERE molecule_id = 'TR004' GROUP BY element ORDER BY COUNT(*) DESC LIMIT 1",
+   "sql": "SELECT element FROM atom WHERE molecule_id = 'TR004' GROUP BY element ORDER BY COUNT(*) DESC LIMIT 1",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     "c"
+    ]
+   ],
+   "rows": [
+    [
+     "c"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.00178
+  },
+  {
+   "id": "S11",
+   "db_id": "toxicology",
+   "difficulty": "moderate",
+   "question": "What share of bonds are double bonds?",
+   "evidence": "double bond refers to bond_type = '='",
+   "gold_sql": "SELECT CAST(SUM(bond_type = '=') AS REAL) * 100 / COUNT(*) FROM bond",
+   "sql": "SELECT SUM(bond_type = '=') * 100 / COUNT(*) FROM bond",
+   "correct": false,
+   "outcome": "wrong rows",
+   "error": null,
+   "expected_rows": [
+    [
+     13.67
+    ]
+   ],
+   "rows": [
+    [
+     13
+    ]
+   ],
+   "confidence": "low",
+   "llm_calls": 8,
+   "cost": 0.00297
+  },
+  {
+   "id": "S12",
+   "db_id": "card_games",
+   "difficulty": "simple",
+   "question": "How many cards have the artist Rebecca Guay?",
+   "evidence": "",
+   "gold_sql": "SELECT COUNT(*) FROM cards WHERE artist = 'Rebecca Guay'",
+   "sql": "SELECT COUNT(*) FROM cards WHERE artist = 'Rebecca Guay'",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     66
+    ]
+   ],
+   "rows": [
+    [
+     66
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.00187
+  },
+  {
+   "id": "S13",
+   "db_id": "card_games",
+   "difficulty": "simple",
+   "question": "Which set has the most cards?",
+   "evidence": "",
+   "gold_sql": "SELECT setCode FROM cards GROUP BY setCode ORDER BY COUNT(*) DESC LIMIT 1",
+   "sql": "SELECT setCode FROM cards GROUP BY setCode ORDER BY COUNT(*) DESC LIMIT 1",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     "PLIST"
+    ]
+   ],
+   "rows": [
+    [
+     "PLIST"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.0016
+  },
+  {
+   "id": "S14",
+   "db_id": "card_games",
+   "difficulty": "moderate",
+   "question": "List the names of cards that are legal in the commander format and have a converted mana cost of 0.",
+   "evidence": "",
+   "gold_sql": "SELECT DISTINCT c.name FROM cards c JOIN legalities l ON l.uuid = c.uuid WHERE l.format = 'commander' AND l.status = 'Legal' AND c.convertedManaCost = 0",
+   "sql": "SELECT DISTINCT c.name FROM cards c JOIN legalities l ON l.uuid = c.uuid WHERE l.format = 'commander' AND c.convertedManaCost = 0",
+   "correct": false,
+   "outcome": "wrong rows",
+   "error": null,
+   "expected_rows": [
+    [
+     "Ornithopter"
+    ],
+    [
+     "Memnite"
+    ]
+   ],
+   "rows": [
+    [
+     "Ornithopter"
+    ],
+    [
+     "Memnite"
+    ],
+    [
+     "Black Lotus"
+    ]
+   ],
+   "confidence": "medium",
+   "llm_calls": 8,
+   "cost": 0.00302
+  },
+  {
+   "id": "S15",
+   "db_id": "card_games",
+   "difficulty": "challenging",
+   "question": "For each rarity, what percentage of cards are borderless?",
+   "evidence": "",
+   "gold_sql": "SELECT rarity, CAST(SUM(borderColor = 'borderless') AS REAL) * 100 / COUNT(*) FROM cards GROUP BY rarity",
+   "sql": "SELECT rarity, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY borderColor) FROM cards GROUP BY rarity",
+   "correct": false,
+   "outcome": "SQL error",
+   "error": "near \"(\": syntax error",
+   "expected_rows": [
+    [
+     "common",
+     0.4
+    ]
+   ],
+   "rows": null,
+   "confidence": null,
+   "llm_calls": 8,
+   "cost": 0.00295
+  },
+  {
+   "id": "S16",
+   "db_id": "codebase_community",
+   "difficulty": "simple",
+   "question": "How many posts have a score above 50?",
+   "evidence": "",
+   "gold_sql": "SELECT COUNT(*) FROM posts WHERE Score > 50",
+   "sql": "SELECT COUNT(*) FROM posts WHERE Score > 50",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     331
+    ]
+   ],
+   "rows": [
+    [
+     331
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.00187
+  },
+  {
+   "id": "S17",
+   "db_id": "codebase_community",
+   "difficulty": "simple",
+   "question": "What is the display name of the user with the highest reputation?",
+   "evidence": "",
+   "gold_sql": "SELECT DisplayName FROM users ORDER BY Reputation DESC LIMIT 1",
+   "sql": "SELECT DisplayName FROM users ORDER BY Reputation DESC LIMIT 1",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     "whuber"
+    ]
+   ],
+   "rows": [
+    [
+     "whuber"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 6,
+   "cost": 0.00206
+  },
+  {
+   "id": "S18",
+   "db_id": "codebase_community",
+   "difficulty": "moderate",
+   "question": "How many comments did posts tagged 'r' receive in 2014?",
+   "evidence": "",
+   "gold_sql": "SELECT COUNT(*) FROM comments c JOIN posts p ON p.Id = c.PostId WHERE p.Tags LIKE '%<r>%' AND strftime('%Y', c.CreationDate) = '2014'",
+   "sql": "SELECT COUNT(*) FROM comments c JOIN posts p ON p.Id = c.PostId WHERE p.Tags LIKE '%r%' AND YEAR(c.CreationDate) = 2014",
+   "correct": false,
+   "outcome": "SQL error",
+   "error": "no such function: YEAR",
+   "expected_rows": [
+    [
+     2210
+    ]
+   ],
+   "rows": null,
+   "confidence": null,
+   "llm_calls": 8,
+   "cost": 0.00317
+  },
+  {
+   "id": "S19",
+   "db_id": "codebase_community",
+   "difficulty": "moderate",
+   "question": "Which user earned the most badges in 2011?",
+   "evidence": "",
+   "gold_sql": "SELECT u.DisplayName FROM badges b JOIN users u ON u.Id = b.UserId WHERE strftime('%Y', b.Date) = '2011' GROUP BY u.Id ORDER BY COUNT(*) DESC LIMIT 1",
+   "sql": "SELECT u.DisplayName FROM badges b JOIN users u ON u.Id = b.UserId WHERE strftime('%Y', b.Date) = '2011' GROUP BY u.Id ORDER BY COUNT(*) DESC LIMIT 1",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     "chl"
+    ]
+   ],
+   "rows": [
+    [
+     "chl"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.00172
+  },
+  {
+   "id": "S20",
+   "db_id": "superhero",
+   "difficulty": "simple",
+   "question": "How many superheroes have blue eyes?",
+   "evidence": "",
+   "gold_sql": "SELECT COUNT(*) FROM superhero s JOIN colour c ON c.id = s.eye_colour_id WHERE c.colour = 'Blue'",
+   "sql": "SELECT COUNT(*) FROM superhero s JOIN colour c ON c.id = s.eye_colour_id WHERE c.colour = 'Blue'",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     211
+    ]
+   ],
+   "rows": [
+    [
+     211
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 6,
+   "cost": 0.00234
+  },
+  {
+   "id": "S21",
+   "db_id": "superhero",
+   "difficulty": "simple",
+   "question": "Which publisher has the most superheroes?",
+   "evidence": "",
+   "gold_sql": "SELECT p.publisher_name FROM superhero s JOIN publisher p ON p.id = s.publisher_id GROUP BY p.id ORDER BY COUNT(*) DESC LIMIT 1",
+   "sql": "SELECT p.publisher_name FROM superhero s JOIN publisher p ON p.id = s.publisher_id GROUP BY p.id ORDER BY COUNT(*) DESC LIMIT 1",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     "Marvel Comics"
+    ]
+   ],
+   "rows": [
+    [
+     "Marvel Comics"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.00209
+  },
+  {
+   "id": "S22",
+   "db_id": "superhero",
+   "difficulty": "moderate",
+   "question": "What is the average weight of female superheroes?",
+   "evidence": "female refers to gender = 'Female'",
+   "gold_sql": "SELECT AVG(s.weight_kg) FROM superhero s JOIN gender g ON g.id = s.gender_id WHERE g.gender = 'Female'",
+   "sql": "SELECT AVG(s.weight_kg) FROM superhero s JOIN gender g ON g.id = s.gender_id WHERE g.gender = 'Female' AND s.weight_kg > 0",
+   "correct": false,
+   "outcome": "wrong rows",
+   "error": null,
+   "expected_rows": [
+    [
+     47.8
+    ]
+   ],
+   "rows": [
+    [
+     60.1
+    ]
+   ],
+   "confidence": "low",
+   "llm_calls": 8,
+   "cost": 0.00263
+  },
+  {
+   "id": "S23",
+   "db_id": "superhero",
+   "difficulty": "challenging",
+   "question": "Which superheroes have the highest strength in each publisher? Keep ties.",
+   "evidence": "",
+   "gold_sql": "SELECT publisher_name, superhero_name FROM (SELECT p.publisher_name, s.superhero_name, RANK() OVER (PARTITION BY p.id ORDER BY ha.attribute_value DESC) AS rk FROM superhero s JOIN publisher p ON p.id = s.publisher_id JOIN hero_attribute ha ON ha.hero_id = s.id JOIN attribute a ON a.id = ha.attribute_id WHERE a.attribute_name = 'Strength') WHERE rk = 1",
+   "sql": "SELECT publisher_name, superhero_name FROM (SELECT p.publisher_name, s.superhero_name, RANK() OVER (PARTITION BY p.id ORDER BY ha.attribute_value DESC) AS rk FROM superhero s JOIN publisher p ON p.id = s.publisher_id JOIN hero_attribute ha ON ha.hero_id = s.id JOIN attribute a ON a.id = ha.attribute_id WHERE a.attribute_name = 'Strength') WHERE rk = 1",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     "DC Comics",
+     "Superman"
+    ],
+    [
+     "DC Comics",
+     "Darkseid"
+    ]
+   ],
+   "rows": [
+    [
+     "DC Comics",
+     "Superman"
+    ],
+    [
+     "DC Comics",
+     "Darkseid"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.00206
+  },
+  {
+   "id": "S24",
+   "db_id": "formula_1",
+   "difficulty": "simple",
+   "question": "How many races were held in 2009?",
+   "evidence": "",
+   "gold_sql": "SELECT COUNT(*) FROM races WHERE year = 2009",
+   "sql": "SELECT COUNT(*) FROM races WHERE year = 2009",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     17
+    ]
+   ],
+   "rows": [
+    [
+     17
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 6,
+   "cost": 0.00249
+  },
+  {
+   "id": "S25",
+   "db_id": "formula_1",
+   "difficulty": "simple",
+   "question": "Which driver has the most race wins?",
+   "evidence": "win refers to position = 1",
+   "gold_sql": "SELECT d.surname FROM results r JOIN drivers d ON d.driverId = r.driverId WHERE r.position = 1 GROUP BY d.driverId ORDER BY COUNT(*) DESC LIMIT 1",
+   "sql": "SELECT d.surname FROM results r JOIN drivers d ON d.driverId = r.driverId WHERE r.position = 1 GROUP BY d.driverId ORDER BY COUNT(*) DESC LIMIT 1",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     "Hamilton"
+    ]
+   ],
+   "rows": [
+    [
+     "Hamilton"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.00187
+  },
+  {
+   "id": "S26",
+   "db_id": "formula_1",
+   "difficulty": "moderate",
+   "question": "What was the fastest lap time at the 2010 Monaco Grand Prix?",
+   "evidence": "",
+   "gold_sql": "SELECT MIN(fastestLapTime) FROM results r JOIN races ra ON ra.raceId = r.raceId WHERE ra.year = 2010 AND ra.name = 'Monaco Grand Prix'",
+   "sql": "SELECT MIN(fastestLapTime) FROM results r JOIN races ra ON ra.raceId = r.raceId WHERE ra.year = 2010 AND ra.name = 'Monaco Grand Prix'",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     "1:15.192"
+    ]
+   ],
+   "rows": [
+    [
+     "1:15.192"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.00193
+  },
+  {
+   "id": "S27",
+   "db_id": "formula_1",
+   "difficulty": "challenging",
+   "question": "For each season since 2000, which constructor scored the most points?",
+   "evidence": "",
+   "gold_sql": "SELECT year, name FROM (SELECT ra.year, c.name, RANK() OVER (PARTITION BY ra.year ORDER BY SUM(cr.points) DESC) AS rk FROM constructorResults cr JOIN races ra ON ra.raceId = cr.raceId JOIN constructors c ON c.constructorId = cr.constructorId WHERE ra.year >= 2000 GROUP BY ra.year, c.constructorId) WHERE rk = 1",
+   "sql": null,
+   "correct": false,
+   "outcome": "no answer",
+   "error": "Every try was too heavy: about 4,800,000 rows read (limit 1,000,000)",
+   "expected_rows": [
+    [
+     2000,
+     "Ferrari"
+    ]
+   ],
+   "rows": null,
+   "confidence": null,
+   "llm_calls": 5,
+   "cost": 0.00199
+  },
+  {
+   "id": "S28",
+   "db_id": "european_football_2",
+   "difficulty": "simple",
+   "question": "How many matches were played in the 2015/2016 season?",
+   "evidence": "",
+   "gold_sql": "SELECT COUNT(*) FROM Match WHERE season = '2015/2016'",
+   "sql": "SELECT COUNT(*) FROM Match WHERE season = '2015/2016'",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     3326
+    ]
+   ],
+   "rows": [
+    [
+     3326
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.00207
+  },
+  {
+   "id": "S29",
+   "db_id": "european_football_2",
+   "difficulty": "moderate",
+   "question": "Which team scored the most home goals in the 2010/2011 Premier League season?",
+   "evidence": "",
+   "gold_sql": "SELECT t.team_long_name FROM Match m JOIN Team t ON t.team_api_id = m.home_team_api_id JOIN League l ON l.id = m.league_id WHERE l.name = 'England Premier League' AND m.season = '2010/2011' GROUP BY t.team_api_id ORDER BY SUM(m.home_team_goal) DESC LIMIT 1",
+   "sql": "SELECT t.team_long_name FROM Match m JOIN Team t ON t.team_api_id = m.home_team_api_id JOIN League l ON l.id = m.league_id WHERE l.name = 'England Premier League' AND m.season = '2010/2011' GROUP BY t.team_api_id ORDER BY SUM(m.home_team_goal) DESC LIMIT 1",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     "Manchester United"
+    ]
+   ],
+   "rows": [
+    [
+     "Manchester United"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 6,
+   "cost": 0.0023
+  },
+  {
+   "id": "S30",
+   "db_id": "european_football_2",
+   "difficulty": "moderate",
+   "question": "What is the average height of players born after 1990?",
+   "evidence": "",
+   "gold_sql": "SELECT AVG(height) FROM Player WHERE birthday > '1990-12-31'",
+   "sql": "SELECT AVG(height) FROM Player WHERE birthday > '1990-01-01'",
+   "correct": false,
+   "outcome": "wrong rows",
+   "error": null,
+   "expected_rows": [
+    [
+     181.2
+    ]
+   ],
+   "rows": [
+    [
+     181.4
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 8,
+   "cost": 0.00275
+  },
+  {
+   "id": "S31",
+   "db_id": "thrombosis_prediction",
+   "difficulty": "simple",
+   "question": "How many patients are female?",
+   "evidence": "",
+   "gold_sql": "SELECT COUNT(*) FROM Patient WHERE SEX = 'F'",
+   "sql": "SELECT COUNT(*) FROM Patient WHERE SEX = 'F'",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     1135
+    ]
+   ],
+   "rows": [
+    [
+     1135
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 6,
+   "cost": 0.00233
+  },
+  {
+   "id": "S32",
+   "db_id": "thrombosis_prediction",
+   "difficulty": "moderate",
+   "question": "How many patients with a severe thrombosis were admitted to hospital?",
+   "evidence": "severe thrombosis refers to Thrombosis = 1; admitted refers to Admission = '+'",
+   "gold_sql": "SELECT COUNT(DISTINCT p.ID) FROM Patient p JOIN Examination e ON e.ID = p.ID WHERE e.Thrombosis = 1 AND p.Admission = '+'",
+   "sql": "SELECT COUNT(*) FROM Patient p JOIN Examination e ON e.ID = p.ID WHERE e.Thrombosis = 1 AND p.Admission = '+'",
+   "correct": false,
+   "outcome": "wrong rows",
+   "error": null,
+   "expected_rows": [
+    [
+     18
+    ]
+   ],
+   "rows": [
+    [
+     23
+    ]
+   ],
+   "confidence": "low",
+   "llm_calls": 5,
+   "cost": 0.00175
+  },
+  {
+   "id": "S33",
+   "db_id": "thrombosis_prediction",
+   "difficulty": "challenging",
+   "question": "What is the average age at first examination of patients with a normal IgG level?",
+   "evidence": "normal IgG refers to 900 < IGG < 2000",
+   "gold_sql": "SELECT AVG(strftime('%Y', e.`Examination Date`) - strftime('%Y', p.Birthday)) FROM Patient p JOIN Examination e ON e.ID = p.ID JOIN Laboratory l ON l.ID = p.ID WHERE l.IGG > 900 AND l.IGG < 2000",
+   "sql": "SELECT AVG(strftime('%Y', e.`Examination Date`) - strftime('%Y', p.Birthday)) FROM Patient p JOIN Examination e ON e.ID = p.ID JOIN Laboratory l ON l.ID = p.ID WHERE l.IGG > 900 AND l.IGG < 2000",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     38.6
+    ]
+   ],
+   "rows": [
+    [
+     38.6
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.00158
+  },
+  {
+   "id": "S34",
+   "db_id": "student_club",
+   "difficulty": "simple",
+   "question": "How many members are in the club?",
+   "evidence": "",
+   "gold_sql": "SELECT COUNT(*) FROM member",
+   "sql": "SELECT COUNT(*) FROM member",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     33
+    ]
+   ],
+   "rows": [
+    [
+     33
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 5,
+   "cost": 0.00196
+  },
+  {
+   "id": "S35",
+   "db_id": "student_club",
+   "difficulty": "simple",
+   "question": "What is the total amount spent on food?",
+   "evidence": "",
+   "gold_sql": "SELECT SUM(cost) FROM expense WHERE expense_description LIKE '%Food%'",
+   "sql": "SELECT SUM(cost) FROM expense WHERE expense_description LIKE '%Food%'",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     1832.5
+    ]
+   ],
+   "rows": [
+    [
+     1832.5
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 6,
+   "cost": 0.00247
+  },
+  {
+   "id": "S36",
+   "db_id": "student_club",
+   "difficulty": "moderate",
+   "question": "Which event had the highest total expenses?",
+   "evidence": "",
+   "gold_sql": "SELECT e.event_name FROM expense x JOIN budget b ON b.budget_id = x.link_to_budget JOIN event e ON e.event_id = b.link_to_event GROUP BY e.event_id ORDER BY SUM(x.cost) DESC LIMIT 1",
+   "sql": "SELECT e.event_name FROM expense x JOIN budget b ON b.budget_id = x.link_to_budget JOIN event e ON e.event_id = b.link_to_event GROUP BY e.event_id ORDER BY SUM(x.cost) DESC LIMIT 1",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     "Yearly Kickoff"
+    ]
+   ],
+   "rows": [
+    [
+     "Yearly Kickoff"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 6,
+   "cost": 0.00197
+  },
+  {
+   "id": "S37",
+   "db_id": "student_club",
+   "difficulty": "moderate",
+   "question": "List the members who attended every event in October 2019.",
+   "evidence": "",
+   "gold_sql": "SELECT m.first_name, m.last_name FROM member m JOIN attendance a ON a.link_to_member = m.member_id JOIN event e ON e.event_id = a.link_to_event WHERE e.event_date LIKE '2019-10%' GROUP BY m.member_id HAVING COUNT(*) = (SELECT COUNT(*) FROM event WHERE event_date LIKE '2019-10%')",
+   "sql": "SELECT m.first_name, m.last_name FROM member m JOIN attendance a ON a.link_to_member = m.member_id JOIN event e ON e.event_id = a.link_to_event WHERE e.event_date LIKE '2019-10%' GROUP BY m.member_id",
+   "correct": false,
+   "outcome": "wrong rows",
+   "error": null,
+   "expected_rows": [
+    [
+     "Adela",
+     "O'Gallagher"
+    ]
+   ],
+   "rows": [
+    [
+     "Adela",
+     "O'Gallagher"
+    ],
+    [
+     "Sacha",
+     "Harrison"
+    ],
+    [
+     "Luisa",
+     "Guidi"
+    ]
+   ],
+   "confidence": "low",
+   "llm_calls": 8,
+   "cost": 0.00326
+  },
+  {
+   "id": "S38",
+   "db_id": "debit_card_specializing",
+   "difficulty": "simple",
+   "question": "How many customers are in the SME segment?",
+   "evidence": "",
+   "gold_sql": "SELECT COUNT(*) FROM customers WHERE Segment = 'SME'",
+   "sql": "SELECT COUNT(*) FROM customers WHERE Segment = 'SME'",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     3804
+    ]
+   ],
+   "rows": [
+    [
+     3804
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 6,
+   "cost": 0.00204
+  },
+  {
+   "id": "S39",
+   "db_id": "debit_card_specializing",
+   "difficulty": "moderate",
+   "question": "Which gas station country had the most transactions in August 2012?",
+   "evidence": "",
+   "gold_sql": "SELECT g.Country FROM transactions_1k t JOIN gasstations g ON g.GasStationID = t.GasStationID WHERE t.Date LIKE '2012-08%' GROUP BY g.Country ORDER BY COUNT(*) DESC LIMIT 1",
+   "sql": "SELECT g.Country FROM transactions_1k t JOIN gasstations g ON g.GasStationID = t.GasStationID WHERE t.Date LIKE '2012-08%' GROUP BY g.Country ORDER BY COUNT(*) DESC LIMIT 1",
+   "correct": true,
+   "outcome": "right",
+   "error": null,
+   "expected_rows": [
+    [
+     "CZE"
+    ]
+   ],
+   "rows": [
+    [
+     "CZE"
+    ]
+   ],
+   "confidence": "high",
+   "llm_calls": 6,
+   "cost": 0.00231
+  },
+  {
+   "id": "S40",
+   "db_id": "debit_card_specializing",
+   "difficulty": "challenging",
+   "question": "Which customer's monthly consumption grew the most between 2012 and 2013?",
+   "evidence": "Date is YYYYMM",
+   "gold_sql": "SELECT CustomerID FROM yearmonth GROUP BY CustomerID ORDER BY SUM(CASE WHEN Date LIKE '2013%' THEN Consumption ELSE 0 END) - SUM(CASE WHEN Date LIKE '2012%' THEN Consumption ELSE 0 END) DESC LIMIT 1",
+   "sql": "SELECT CustomerID FROM yearmonth WHERE Date BETWEEN '2012-01' AND '2013-12' GROUP BY CustomerID ORDER BY SUM(Consumption) DESC LIMIT 1",
+   "correct": false,
+   "outcome": "wrong rows",
+   "error": null,
+   "expected_rows": [
+    [
+     7
+    ]
+   ],
+   "rows": [
+    [
+     46
+    ]
+   ],
+   "confidence": "medium",
+   "llm_calls": 5,
+   "cost": 0.0016
+  }
+ ]
+}

@@ -123,3 +123,12 @@ def test_tables_used_come_from_the_final_sql():
     sql = ("WITH c AS (SELECT store_id, COUNT(*) n FROM orders GROUP BY store_id) "
            "SELECT * FROM c JOIN stores s ON s.store_id = c.store_id WHERE s.store_id IN (SELECT store_id FROM customers)")
     assert sorted(tables_in_sql(sql, known)) == ["customers", "orders", "stores"]
+
+
+def test_a_value_the_data_lacks_becomes_a_note_for_the_meaning():
+    from backend.text_to_sql.pipeline import TextToSQLPipeline
+
+    problem = "city has no value 'New York City'; its values are 'NY', 'NYC'."
+    note = TextToSQLPipeline._missing_values([{"problems": [problem]}, {"problems": [problem, "other"]}])
+    assert note == f"Scout checked the data: {problem} Use the values the data actually stores."
+    assert TextToSQLPipeline._missing_values([{"problems": ["Dividing cents by 100"]}]) == ""

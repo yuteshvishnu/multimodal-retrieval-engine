@@ -2,7 +2,7 @@ import os
 from typing import List, Dict, Tuple
 from backend.llm import chat, make_client
 
-from backend.config import GROQ_API_KEY, GROQ_MODEL_RAG
+from backend.config import LLM_API_KEY, LLM_MODEL_RAG
 
 # Prompt injection guard: the documents are what the user uploaded, so they may contain text
 # written to steer the model ("ignore your instructions..."). They're fenced in <documents>
@@ -27,11 +27,11 @@ class LLMReasoner:
     2. Fallback: Local rule-based bullet summary if API fails.
     """
 
-    def __init__(self, api_key: str = GROQ_API_KEY):
+    def __init__(self, api_key: str = LLM_API_KEY):
         # Points to Groq's high-speed infrastructure
         # (no key -> no client, so every answer uses the rule-based fallback)
         self.client = make_client(api_key)
-        self.model_name = GROQ_MODEL_RAG
+        self.model_name = LLM_MODEL_RAG
         # We set this to None so pipeline.py knows we aren't using a local model
         self.generator = None 
 
@@ -52,7 +52,7 @@ class LLMReasoner:
 
     def _answer_with_cloud(self, query, chunks, tag=None) -> Tuple[str, str]:
         if self.client is None:
-            raise RuntimeError("GROQ_API_KEY is not set")
+            raise RuntimeError("The LLM API key is not set (LLM_PROVIDER and its key in .env).")
         # the whole chunk, not the short snippet shown in the UI, fenced off as data
         context = "\n".join(
             f"[{c['id']}] {fence(c.get('text', c['snippet']))}" for c in chunks[:5]

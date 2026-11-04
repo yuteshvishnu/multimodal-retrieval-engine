@@ -11,7 +11,7 @@ from backend.config import (
 from backend.rag.encoders.text_encoder import get_text_encoder
 from backend.text_to_sql.answer_cache import AnswerCache
 from backend.text_to_sql.checks import (
-    check_result, check_sql, date_ranges, describe_rows, explain_disagreement, question_problems,
+    MISSING_VALUE, check_result, check_sql, date_ranges, describe_rows, explain_disagreement, question_problems,
     result_signature, tables_in_sql,
 )
 from backend.text_to_sql.database import QueryTimeout, SQLiteDatabase
@@ -52,7 +52,9 @@ class TextToSQLPipeline:
     use_retrieval=False sends the full schema instead (versions 1-2 behaviour), for comparison.
     """
 
-    def __init__(self, use_retrieval: bool = True, top_k: int = TOP_K_TABLES):
+    def __init__(self, use_retrieval: bool = True, top_k: int = TOP_K_TABLES, data_dir: str = "data/text_to_sql"):
+        """data_dir: the folder whose .sqlite files this Scout can see (an evaluation gives BIRD one database)."""
+        self.data_dir = data_dir
         self.generator = SQLGenerator()
         self.interpreter = QuestionInterpreter()
         self.planner = StepPlanner()  # Version-10: the steps the user checks
@@ -75,7 +77,7 @@ class TextToSQLPipeline:
         keeps using the old one.
         """
         with self._reload_lock:
-            database = SQLiteDatabase()
+            database = SQLiteDatabase(self.data_dir)
             tables = database.tables
             index = SchemaIndex(tables) if self.use_retrieval and tables else None
             self.database, self.tables, self.index = database, tables, index
@@ -93,7 +95,7 @@ class TextToSQLPipeline:
 
     def interpret(
         self, query_text: str, history: Optional[List[dict]] = None, previous: Optional[dict] = None,
-        question_id: Optional[str] = None,
+        question_id: Optional[str] = None, use_saved: bool = True,
     ) -> dict:
         """
         Up to 3 meanings of the question for the user to pick from.
@@ -117,7 +119,8 @@ class TextToSQLPipeline:
 
         tables, schema, context, _ = self._prepare(query_text, previous)
         # Version-12: the same question asked before (in any words): its meaning goes first
-        saved = self.answers.match(query_text) if not history and not previous else None
+        # (an evaluation run passes use_saved=False: it must answer every question itself)
+        saved = self.answers.match(query_text) if use_saved and not history and not previous else None
         try:
             options = self.interpreter.options(
                 query_text, schema, context, history,
@@ -199,7 +202,7 @@ class TextToSQLPipeline:
 
     def run(
         self, query_text: str, meaning: str = "", previous: Optional[dict] = None, question_id: Optional[str] = None,
-        steps: Optional[List[str]] = None,
+        steps: Optional[List[str]] = None, save: bool = True,
     ) -> dict:
         error = self._question_error(query_text)
         if error:
@@ -319,6 +322,9 @@ class TextToSQLPipeline:
                 "tables": table_names,
                 "error": self._failure_message(attempts, stopped_early),
                 "failure_reason": " ".join(reasons),
+                # the confirmed meaning asks for a value the data doesn't have: the SQL step can't fix
+                # that (it must follow the meaning), so the meaning is asked again with the real values
+                "rethink_meaning": self._missing_values(attempts),
                 "llm_calls": budget.used,
                 "attempts": summary,
                 "feedback": "\n\n".join(f for f in feedback_sent if f),
@@ -336,7 +342,7 @@ class TextToSQLPipeline:
         # Version-8: keep the result on the server; the UI gets page 1 and asks for the rest
         result_id = self.results.put(chosen["sql"], chosen["columns"], chosen["rows"], chosen["more"])
         # Version-12: saved for reuse (unless it's a follow-up, which depends on the earlier answer)
-        if not (previous or {}).get("question"):
+        if save and not (previous or {}).get("question"):
             self.answers.add(query_text, meaning, steps or [], chosen["sql"], question_id, confidence)
 
         return {
@@ -391,6 +397,15 @@ class TextToSQLPipeline:
             "llm_calls": 0,
             "reused": True,
         }
+
+    @staticmethod
+    def _missing_values(attempts: List[dict]) -> str:
+        """The checks' "<column> has no value ..." problems, as a note for the meaning step ("" if none)."""
+        found = list(dict.fromkeys(p for a in attempts for p in a["problems"] if MISSING_VALUE.search(p)))
+        if not found:
+            return ""
+        return ("Scout checked the data: " + " ".join(found)
+                + " Use the values the data actually stores.")
 
     @staticmethod
     def _failure_message(attempts: List[dict], stopped_early: bool) -> str:

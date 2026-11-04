@@ -59,7 +59,7 @@
   {
     "id": 3,
     "difficulty": "easy",
-    "question": "What is the most expensive product, and what is its price in dollars?",
+    "question": "What is the name of the most expensive product, and what is its price in dollars?",
     "gold_sql": "SELECT product_name, unit_price_cents / 100.0 AS price_dollars FROM products ORDER BY unit_price_cents DESC LIMIT 1;",
     "trap": "Prices are stored in cents. A model that returns 39999 as the price in dollars is wrong.",
     "answer_columns": [
@@ -91,17 +91,15 @@
   {
     "id": 5,
     "difficulty": "easy",
-    "question": "Which store has the most employees?",
-    "gold_sql": "SELECT s.store_name, COUNT(*) AS employee_count FROM employees e JOIN stores s ON e.store_id = s.store_id GROUP BY s.store_id ORDER BY employee_count DESC LIMIT 1;",
+    "question": "What is the name of the store with the most employees?",
+    "gold_sql": "SELECT s.store_name FROM employees e JOIN stores s ON e.store_id = s.store_id GROUP BY s.store_id ORDER BY COUNT(*) DESC LIMIT 1;",
     "trap": null,
     "answer_columns": [
-      "store_name",
-      "employee_count"
+      "store_name"
     ],
     "answer_rows": [
       [
-        "Brooklyn Main",
-        9
+        "Brooklyn Main"
       ]
     ]
   },
@@ -109,16 +107,14 @@
     "id": 6,
     "difficulty": "easy",
     "question": "Which payment method is used most often?",
-    "gold_sql": "SELECT method, COUNT(*) AS uses FROM payments GROUP BY method ORDER BY uses DESC LIMIT 1;",
+    "gold_sql": "SELECT method FROM payments GROUP BY method ORDER BY COUNT(*) DESC LIMIT 1;",
     "trap": null,
     "answer_columns": [
-      "method",
-      "uses"
+      "method"
     ],
     "answer_rows": [
       [
-        "debit_card",
-        19
+        "debit_card"
       ]
     ]
   },
@@ -155,32 +151,38 @@
   {
     "id": 9,
     "difficulty": "medium",
-    "question": "Who are the top 5 customers by total amount spent, in dollars?",
-    "gold_sql": "SELECT c.first_name || ' ' || c.last_name AS customer, SUM(oi.quantity * oi.unit_price_cents) / 100.0 AS total_spent FROM customers c JOIN orders o ON c.customer_id = o.customer_id JOIN order_items oi ON o.order_id = oi.order_id WHERE o.status != 'cancelled' GROUP BY c.customer_id ORDER BY total_spent DESC LIMIT 5;",
+    "question": "List the first and last names of the top 5 customers by total amount spent, and how much each spent in dollars.",
+    "gold_sql": "SELECT c.first_name, c.last_name, SUM(oi.quantity * oi.unit_price_cents) / 100.0 FROM customers c JOIN orders o ON c.customer_id = o.customer_id JOIN order_items oi ON o.order_id = oi.order_id WHERE o.status != 'cancelled' GROUP BY c.customer_id ORDER BY SUM(oi.quantity * oi.unit_price_cents) DESC LIMIT 5;",
     "trap": "Needs a three-table join, cents-to-dollars conversion, and excluding cancelled orders.",
     "answer_columns": [
-      "customer",
-      "total_spent"
+      "first_name",
+      "last_name",
+      "SUM(oi.quantity * oi.unit_price_cents) / 100.0"
     ],
     "answer_rows": [
       [
-        "Thomas Patel",
+        "Thomas",
+        "Patel",
         1941.89
       ],
       [
-        "Mary Williams",
+        "Mary",
+        "Williams",
         1631.94
       ],
       [
-        "Wei Baker",
+        "Wei",
+        "Baker",
         859.9
       ],
       [
-        "Ananya Kim",
+        "Ananya",
+        "Kim",
         677.93
       ],
       [
-        "Karen Lee",
+        "Karen",
+        "Lee",
         551.93
       ]
     ]
@@ -188,12 +190,12 @@
   {
     "id": 10,
     "difficulty": "medium",
-    "question": "What is the total revenue in dollars for each store that has sales?",
-    "gold_sql": "SELECT s.store_name, SUM(oi.quantity * oi.unit_price_cents) / 100.0 AS revenue FROM stores s JOIN orders o ON s.store_id = o.store_id JOIN order_items oi ON o.order_id = oi.order_id WHERE o.status != 'cancelled' GROUP BY s.store_id ORDER BY revenue DESC;",
+    "question": "For each store that has sales, give the store name and its total revenue in dollars.",
+    "gold_sql": "SELECT s.store_name, SUM(oi.quantity * oi.unit_price_cents) / 100.0 FROM stores s JOIN orders o ON s.store_id = o.store_id JOIN order_items oi ON o.order_id = oi.order_id WHERE o.status != 'cancelled' GROUP BY s.store_id ORDER BY SUM(oi.quantity * oi.unit_price_cents) DESC;",
     "trap": null,
     "answer_columns": [
       "store_name",
-      "revenue"
+      "SUM(oi.quantity * oi.unit_price_cents) / 100.0"
     ],
     "answer_rows": [
       [
@@ -241,50 +243,48 @@
   {
     "id": 11,
     "difficulty": "medium",
-    "question": "Which supplier provides the most products?",
-    "gold_sql": "SELECT su.supplier_name, COUNT(*) AS product_count FROM suppliers su JOIN products p ON su.supplier_id = p.supplier_id GROUP BY su.supplier_id ORDER BY product_count DESC LIMIT 1;",
+    "question": "What is the name of the supplier that provides the most products?",
+    "gold_sql": "SELECT su.supplier_name FROM suppliers su JOIN products p ON su.supplier_id = p.supplier_id GROUP BY su.supplier_id ORDER BY COUNT(*) DESC LIMIT 1;",
     "trap": null,
     "answer_columns": [
-      "supplier_name",
-      "product_count"
+      "supplier_name"
     ],
     "answer_rows": [
       [
-        "Blue Ridge Supply Co",
-        8
+        "Blue Ridge Supply Co"
       ]
     ]
   },
   {
     "id": 12,
     "difficulty": "medium",
-    "question": "What is the average review rating for each product category?",
-    "gold_sql": "SELECT p.category, ROUND(AVG(r.rating), 2) AS avg_rating FROM reviews r JOIN products p ON r.product_id = p.product_id GROUP BY p.category ORDER BY avg_rating DESC;",
+    "question": "For each product category, what is the average review rating?",
+    "gold_sql": "SELECT p.category, AVG(r.rating) FROM reviews r JOIN products p ON r.product_id = p.product_id GROUP BY p.category;",
     "trap": null,
     "answer_columns": [
       "category",
-      "avg_rating"
+      "AVG(r.rating)"
     ],
     "answer_rows": [
       [
-        "Clothing",
-        3.93
+        "Books",
+        3.2222222222222223
       ],
       [
-        "Sports & Outdoors",
-        3.67
+        "Clothing",
+        3.9285714285714284
       ],
       [
         "Electronics",
-        3.64
+        3.6363636363636362
       ],
       [
         "Home & Kitchen",
-        3.43
+        3.4285714285714284
       ],
       [
-        "Books",
-        3.22
+        "Sports & Outdoors",
+        3.6666666666666665
       ]
     ]
   },
@@ -373,14 +373,14 @@
     "id": 14,
     "difficulty": "medium",
     "question": "What is the average delivery time in days for delivered shipments?",
-    "gold_sql": "SELECT ROUND(AVG(julianday(delivered_date) - julianday(shipped_date)), 2) AS avg_days FROM shipments WHERE status = 'delivered';",
+    "gold_sql": "SELECT AVG(julianday(delivered_date) - julianday(shipped_date)) FROM shipments WHERE status = 'delivered';",
     "trap": null,
     "answer_columns": [
-      "avg_days"
+      "AVG(julianday(delivered_date) - julianday(shipped_date))"
     ],
     "answer_rows": [
       [
-        3.63
+        3.6333333333333333
       ]
     ]
   },
@@ -402,72 +402,78 @@
   {
     "id": 16,
     "difficulty": "hard",
-    "question": "Which employees earn more than their manager?",
-    "gold_sql": "SELECT e.first_name || ' ' || e.last_name AS employee, e.salary, m.first_name || ' ' || m.last_name AS manager, m.salary AS manager_salary FROM employees e JOIN employees m ON e.manager_id = m.employee_id WHERE e.salary > m.salary;",
+    "question": "List the first and last names of the employees who earn more than their manager.",
+    "gold_sql": "SELECT e.first_name, e.last_name FROM employees e JOIN employees m ON e.manager_id = m.employee_id WHERE e.salary > m.salary;",
     "trap": "Needs a self-join on the employees table.",
     "answer_columns": [
-      "employee",
-      "salary",
-      "manager",
-      "manager_salary"
+      "first_name",
+      "last_name"
     ],
     "answer_rows": [
       [
-        "Sofia Mitchell",
-        82000,
-        "Susan Singh",
-        78000
+        "Sofia",
+        "Mitchell"
       ],
       [
-        "Kenji Brown",
-        84500,
-        "Carlos Patel",
-        83000
+        "Kenji",
+        "Brown"
       ]
     ]
   },
   {
     "id": 17,
     "difficulty": "hard",
-    "question": "Which customers have placed orders but never written a review?",
-    "gold_sql": "SELECT DISTINCT c.first_name || ' ' || c.last_name AS customer FROM customers c JOIN orders o ON c.customer_id = o.customer_id WHERE c.customer_id NOT IN (SELECT customer_id FROM reviews) ORDER BY customer;",
+    "question": "List the first and last names of the customers who have placed orders but never written a review.",
+    "gold_sql": "SELECT DISTINCT c.first_name, c.last_name FROM customers c JOIN orders o ON c.customer_id = o.customer_id WHERE c.customer_id NOT IN (SELECT customer_id FROM reviews) ORDER BY c.last_name, c.first_name;",
     "trap": null,
     "answer_columns": [
-      "customer"
+      "first_name",
+      "last_name"
     ],
     "answer_rows": [
       [
-        "Chloe Ali"
+        "Chloe",
+        "Ali"
       ],
       [
-        "Daniel Allen"
+        "Daniel",
+        "Allen"
       ],
       [
-        "Daniel Smith"
+        "Jessica",
+        "Allen"
       ],
       [
-        "Elizabeth Smith"
+        "Wei",
+        "Baker"
       ],
       [
-        "Fatima Martinez"
+        "Mei",
+        "Chen"
       ],
       [
-        "Jessica Allen"
+        "Michael",
+        "Green"
       ],
       [
-        "Karen Scott"
+        "Fatima",
+        "Martinez"
       ],
       [
-        "Mei Chen"
+        "Ravi",
+        "Nelson"
       ],
       [
-        "Michael Green"
+        "Karen",
+        "Scott"
       ],
       [
-        "Ravi Nelson"
+        "Daniel",
+        "Smith"
       ],
       [
-        "Wei Baker"
+        "Elizabeth",
+        "Smith"
       ]
     ]
   },
@@ -475,10 +481,10 @@
     "id": 18,
     "difficulty": "hard",
     "question": "What percentage of all orders were cancelled?",
-    "gold_sql": "SELECT ROUND(100.0 * SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) / COUNT(*), 2) AS cancelled_pct FROM orders;",
+    "gold_sql": "SELECT 100.0 * SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) / COUNT(*) FROM orders;",
     "trap": "Integer division trap: without 100.0 the result rounds to 0.",
     "answer_columns": [
-      "cancelled_pct"
+      "100.0 * SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) / COUNT(*)"
     ],
     "answer_rows": [
       [
@@ -489,7 +495,7 @@
   {
     "id": 19,
     "difficulty": "hard",
-    "question": "Which product category generated the most revenue, and how much in dollars?",
+    "question": "What is the product category that generated the most revenue, and how much revenue in dollars?",
     "gold_sql": "SELECT p.category, SUM(oi.quantity * oi.unit_price_cents) / 100.0 AS revenue FROM order_items oi JOIN products p ON oi.product_id = p.product_id JOIN orders o ON oi.order_id = o.order_id WHERE o.status != 'cancelled' GROUP BY p.category ORDER BY revenue DESC LIMIT 1;",
     "trap": null,
     "answer_columns": [
@@ -506,94 +512,94 @@
   {
     "id": 20,
     "difficulty": "hard",
-    "question": "For each store that has orders, which employee handled the most orders there?",
-    "gold_sql": "WITH counts AS (SELECT o.store_id, o.employee_id, COUNT(*) AS n FROM orders o GROUP BY o.store_id, o.employee_id), ranked AS (SELECT *, RANK() OVER (PARTITION BY store_id ORDER BY n DESC) AS rk FROM counts) SELECT s.store_name, e.first_name || ' ' || e.last_name AS employee, r.n AS orders_handled FROM ranked r JOIN stores s ON r.store_id = s.store_id JOIN employees e ON r.employee_id = e.employee_id WHERE r.rk = 1 ORDER BY s.store_id, employee;",
+    "question": "For each store that has orders, list the store name and the first and last names of the employee who handled the most orders there. If employees tie, list all of them.",
+    "gold_sql": "WITH counts AS (SELECT o.store_id, o.employee_id, COUNT(*) AS n FROM orders o GROUP BY o.store_id, o.employee_id), ranked AS (SELECT *, RANK() OVER (PARTITION BY store_id ORDER BY n DESC) AS rk FROM counts) SELECT s.store_name, e.first_name, e.last_name FROM ranked r JOIN stores s ON r.store_id = s.store_id JOIN employees e ON r.employee_id = e.employee_id WHERE r.rk = 1 ORDER BY s.store_id, e.last_name, e.first_name;",
     "trap": "Top-1 per group. Ties are kept, so a store can list more than one employee.",
     "answer_columns": [
       "store_name",
-      "employee",
-      "orders_handled"
+      "first_name",
+      "last_name"
     ],
     "answer_rows": [
       [
         "New York Main",
-        "Arjun Tanaka",
-        2
+        "Arjun",
+        "Tanaka"
       ],
       [
         "Brooklyn Main",
-        "Barbara Ali",
-        3
+        "Barbara",
+        "Ali"
       ],
       [
         "Brooklyn Main",
-        "Ravi Khan",
-        3
+        "Ravi",
+        "Khan"
       ],
       [
         "Chicago Main",
-        "Daniel Tanaka",
-        1
+        "Elizabeth",
+        "Hall"
       ],
       [
         "Chicago Main",
-        "Elizabeth Hall",
-        1
+        "Daniel",
+        "Tanaka"
       ],
       [
         "Madison Main",
-        "John Patel",
-        3
+        "John",
+        "Patel"
       ],
       [
         "Milwaukee Main",
-        "Aisha Patel",
-        1
+        "Michael",
+        "Martinez"
       ],
       [
         "Milwaukee Main",
-        "Arjun Walker",
-        1
+        "Aisha",
+        "Patel"
       ],
       [
         "Milwaukee Main",
-        "Michael Martinez",
-        1
+        "Arjun",
+        "Walker"
       ],
       [
         "Milwaukee Main",
-        "Olivia Walker",
-        1
+        "Olivia",
+        "Walker"
       ],
       [
         "Austin Main",
-        "Karen Mitchell",
-        4
+        "Richard",
+        "Martinez"
       ],
       [
         "Austin Main",
-        "Richard Martinez",
-        4
+        "Karen",
+        "Mitchell"
       ],
       [
         "Dallas Main",
-        "Patricia Lee",
-        2
+        "Patricia",
+        "Lee"
       ],
       [
         "Houston Main",
-        "Arjun Adams",
-        2
+        "Arjun",
+        "Adams"
       ],
       [
         "Seattle Main",
-        "Sofia Mitchell",
-        3
+        "Sofia",
+        "Mitchell"
       ],
       [
         "San Francisco Main",
-        "Lucas Adams",
-        1
+        "Lucas",
+        "Adams"
       ]
     ]
   }

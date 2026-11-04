@@ -11,6 +11,8 @@ const EXAMPLES = [
 ];
 
 const STEPS = ["Ask", "Confirm meaning", "Check steps", "Answer"];
+// meanings in all when the checks send a question back to the meaning (MAX_MEANING_TRIES in config.py)
+const MAX_MEANING_TRIES = 2;
 
 // The model's meaning plus its choices, as one text for the SQL step.
 function meaningText(option) {
@@ -46,6 +48,8 @@ export default function SqlTab() {
   const [meaning, setMeaning] = useState(""); // the meaning the user confirmed
   const [plan, setPlan] = useState(null); // {steps, round, max_rounds} to check (Version-10)
   const [planHistory, setPlanHistory] = useState([]); // earlier steps + the user's comments
+  const [shownOptions, setShownOptions] = useState([]); // the meanings offered when the user picked one
+  const [dataNote, setDataNote] = useState(""); // the checks found the meaning asks for values the data doesn't have
 
   // what a follow-up refers to, sent with both steps
   const previous = followUp && lastAnswer ? JSON.stringify(lastAnswer) : "";
@@ -83,6 +87,7 @@ export default function SqlTab() {
     setPlan(null);
     setPlanHistory([]);
     setHistory([]);
+    setDataNote("");
     setQuestionId(""); // a new question gets a new id
     interpret(text, [], "");
   }
@@ -108,6 +113,8 @@ export default function SqlTab() {
 
     const option = clarify.options[picked];
     const confirmed = meaningText(option);
+    setShownOptions(clarify.options);
+    setDataNote("");
     setMeaning(confirmed);
     setClarify(null);
     setPlanHistory([]);
@@ -167,6 +174,17 @@ export default function SqlTab() {
         requestPlan(confirmed, []);
         return;
       }
+      // the meaning asks for a value the data doesn't have: offer the meanings again, told the real
+      // values (once: at most MAX_MEANING_TRIES meanings in all, as in config.py)
+      const asked = history.filter((round) => round.fromCheck).length;
+      if (data.rethink_meaning && asked < MAX_MEANING_TRIES - 1) {
+        const pastRounds = [...history, { options: shownOptions, comment: data.rethink_meaning, fromCheck: true }];
+        setHistory(pastRounds);
+        setDataNote(data.rethink_meaning);
+        setLoading("");
+        interpret(question, pastRounds);
+        return;
+      }
       if (data.safety) {
         setSafety(data.safety); // blocked: nothing was run, so there is no result to show
       } else if (data.limit) {
@@ -195,6 +213,7 @@ export default function SqlTab() {
     setPlanHistory([]);
     setMeaning("");
     setHistory([]);
+    setDataNote("");
     setPicked(null);
     setComment("");
     setError("");
@@ -306,6 +325,7 @@ export default function SqlTab() {
             </span>
           </div>
           <div className="card-body">
+            {dataNote && <p className="alert alert-warning">{dataNote}</p>}
             <div className="options">
               {clarify.options.map((option, i) => (
                 <label key={i} className={`option ${picked === i ? "picked" : ""}`}>

@@ -20,6 +20,9 @@ from sqlglot import exp
 
 from backend.config import SHARE_ROWS_WITH_LLM
 
+# check_sql's problem when the SQL compares a column with a value it never has ("city has no value 'X'")
+MISSING_VALUE = re.compile(r"^\w+ has no value ")
+
 # columns with at most this many distinct values are treated as categories
 MAX_CATEGORY_VALUES = 20
 # distinct values read per text column when looking for dates (keeps startup fast on big tables)

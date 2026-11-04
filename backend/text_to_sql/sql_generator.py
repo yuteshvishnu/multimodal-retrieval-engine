@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from backend.llm import chat, make_client
 
-from backend.config import GROQ_API_KEY, GROQ_MODEL_SQL
+from backend.config import LLM_API_KEY, LLM_MODEL_SQL
 
 
 SYSTEM_PROMPT = (
@@ -13,6 +13,10 @@ SYSTEM_PROMPT = (
     "Use only the tables and columns in the schema. "
     "Use the context for the current date and for what dates the data covers. "
     "If the user's confirmed meaning is given, follow it exactly: it decides anything the question leaves open. "
+    # answer format (BIRD's convention): an evaluation compares the result's columns exactly
+    "Return only the columns the question asks for, exactly as stored: no ids, extra counts or other "
+    "extra columns, no joined text (keep first_name and last_name as separate columns), and no ROUND "
+    "or other formatting, unless the question asks for it. "
     "Return only the SQL query, with no explanation."
 )
 
@@ -50,8 +54,8 @@ class SQLGenerator:
     """
 
     def __init__(self):
-        self.api_key = GROQ_API_KEY
-        self.model_name = GROQ_MODEL_SQL
+        self.api_key = LLM_API_KEY
+        self.model_name = LLM_MODEL_SQL
         self.client = None
         # Version-9: returns the error book's one-line SQLite rules, added to the prompt
         self.rules = None
@@ -69,7 +73,7 @@ class SQLGenerator:
         steps: Optional[List[str]] = None,
     ) -> str:
         if not self.api_key:
-            raise RuntimeError("GROQ_API_KEY is not set.")
+            raise RuntimeError("The LLM API key is not set (LLM_PROVIDER and its key in .env).")
 
         budget.take()  # raises once the per-question limit is used up
 

@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple
 
 from backend.llm import chat, make_client
 
-from backend.config import GROQ_MODEL_SUMMARY, SHARE_ROWS_WITH_LLM
+from backend.config import LLM_MODEL_SUMMARY, SHARE_ROWS_WITH_LLM
 
 SUMMARY_FILE = "table_summaries.json"
 SAMPLE_ROWS = 5
@@ -159,12 +159,12 @@ class TableSummarizer:
         returns (summary, problems), and the user decides whether to keep it.
         """
         if self.client is None:
-            raise RuntimeError("GROQ_API_KEY is not set.")
+            raise RuntimeError("The LLM API key is not set (LLM_PROVIDER and its key in .env).")
         prompt = self._table_prompt(table, feedback) + f"\n\nCurrent description (the user says it is wrong):\n{current}"
         completion = chat(
             self.client,
             {"stage": "table_description"},
-            model=GROQ_MODEL_SUMMARY,
+            model=LLM_MODEL_SUMMARY,
             messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
             temperature=0.2,
         )
@@ -173,7 +173,7 @@ class TableSummarizer:
 
     def _summarize(self, table: dict, all_names: List[str], feedback: List[str] = ()) -> Optional[str]:
         if self.client is None:
-            raise RuntimeError("GROQ_API_KEY is not set.")
+            raise RuntimeError("The LLM API key is not set (LLM_PROVIDER and its key in .env).")
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -183,7 +183,7 @@ class TableSummarizer:
             completion = chat(
                 self.client,
                 {"stage": "table_description"},
-                model=GROQ_MODEL_SUMMARY,
+                model=LLM_MODEL_SUMMARY,
                 messages=messages,
                 temperature=0.2,
             )

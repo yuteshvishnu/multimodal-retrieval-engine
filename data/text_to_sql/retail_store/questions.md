@@ -4,36 +4,38 @@ Database: `retail_store.sqlite` (10 tables, 50 rows each). Schema: `schema.sql`.
 
 Use Part 1 to test your system. Check its answers against Part 2, the answer key.
 
+Answers follow BIRD's format: columns exactly as stored, only what the question asks for, no rounding or joining of text unless asked. A result is right only if its rows match exactly (row order doesn't matter).
+
 ## Part 1: Questions
 
 ### Easy
 
 1. How many customers are there?
 2. List the names of all products in the Electronics category.
-3. What is the most expensive product, and what is its price in dollars?
+3. What is the name of the most expensive product, and what is its price in dollars?
 4. How many orders have been delivered?
-5. Which store has the most employees?
+5. What is the name of the store with the most employees?
 6. Which payment method is used most often?
 
 ### Medium
 
 7. How many customers live in New York City?
 8. How many orders were placed in March 2026?
-9. Who are the top 5 customers by total amount spent, in dollars?
-10. What is the total revenue in dollars for each store that has sales?
-11. Which supplier provides the most products?
-12. What is the average review rating for each product category?
+9. List the first and last names of the top 5 customers by total amount spent, and how much each spent in dollars.
+10. For each store that has sales, give the store name and its total revenue in dollars.
+11. What is the name of the supplier that provides the most products?
+12. For each product category, what is the average review rating?
 13. Which products have never been reviewed?
 14. What is the average delivery time in days for delivered shipments?
 
 ### Hard
 
 15. How many unique customers placed at least one order in the second quarter (April to June) of 2026?
-16. Which employees earn more than their manager?
-17. Which customers have placed orders but never written a review?
+16. List the first and last names of the employees who earn more than their manager.
+17. List the first and last names of the customers who have placed orders but never written a review.
 18. What percentage of all orders were cancelled?
-19. Which product category generated the most revenue, and how much in dollars?
-20. For each store that has orders, which employee handled the most orders there?
+19. What is the product category that generated the most revenue, and how much revenue in dollars?
+20. For each store that has orders, list the store name and the first and last names of the employee who handled the most orders there. If employees tie, list all of them.
 
 ## Part 2: Answer key
 
@@ -70,7 +72,7 @@ Answer:
 | Wireless Earbuds |
 | Wireless Mouse |
 
-### Q3. What is the most expensive product, and what is its price in dollars?
+### Q3. What is the name of the most expensive product, and what is its price in dollars?
 *Difficulty: easy*
 
 **Trap:** Prices are stored in cents. A model that returns 39999 as the price in dollars is wrong.
@@ -94,31 +96,23 @@ SELECT COUNT(*) FROM orders WHERE status = 'delivered';
 
 Answer: **30**
 
-### Q5. Which store has the most employees?
+### Q5. What is the name of the store with the most employees?
 *Difficulty: easy*
 
 ```sql
-SELECT s.store_name, COUNT(*) AS employee_count FROM employees e JOIN stores s ON e.store_id = s.store_id GROUP BY s.store_id ORDER BY employee_count DESC LIMIT 1;
+SELECT s.store_name FROM employees e JOIN stores s ON e.store_id = s.store_id GROUP BY s.store_id ORDER BY COUNT(*) DESC LIMIT 1;
 ```
 
-Answer:
-
-| store_name | employee_count |
-|---|---|
-| Brooklyn Main | 9 |
+Answer: **Brooklyn Main**
 
 ### Q6. Which payment method is used most often?
 *Difficulty: easy*
 
 ```sql
-SELECT method, COUNT(*) AS uses FROM payments GROUP BY method ORDER BY uses DESC LIMIT 1;
+SELECT method FROM payments GROUP BY method ORDER BY COUNT(*) DESC LIMIT 1;
 ```
 
-Answer:
-
-| method | uses |
-|---|---|
-| debit_card | 19 |
+Answer: **debit_card**
 
 ### Q7. How many customers live in New York City?
 *Difficulty: medium*
@@ -142,35 +136,35 @@ SELECT COUNT(*) FROM orders WHERE order_date LIKE '03/%/2026';
 
 Answer: **3**
 
-### Q9. Who are the top 5 customers by total amount spent, in dollars?
+### Q9. List the first and last names of the top 5 customers by total amount spent, and how much each spent in dollars.
 *Difficulty: medium*
 
 **Trap:** Needs a three-table join, cents-to-dollars conversion, and excluding cancelled orders.
 
 ```sql
-SELECT c.first_name || ' ' || c.last_name AS customer, SUM(oi.quantity * oi.unit_price_cents) / 100.0 AS total_spent FROM customers c JOIN orders o ON c.customer_id = o.customer_id JOIN order_items oi ON o.order_id = oi.order_id WHERE o.status != 'cancelled' GROUP BY c.customer_id ORDER BY total_spent DESC LIMIT 5;
+SELECT c.first_name, c.last_name, SUM(oi.quantity * oi.unit_price_cents) / 100.0 FROM customers c JOIN orders o ON c.customer_id = o.customer_id JOIN order_items oi ON o.order_id = oi.order_id WHERE o.status != 'cancelled' GROUP BY c.customer_id ORDER BY SUM(oi.quantity * oi.unit_price_cents) DESC LIMIT 5;
 ```
 
 Answer:
 
-| customer | total_spent |
-|---|---|
-| Thomas Patel | 1941.89 |
-| Mary Williams | 1631.94 |
-| Wei Baker | 859.9 |
-| Ananya Kim | 677.93 |
-| Karen Lee | 551.93 |
+| first_name | last_name | SUM(oi.quantity * oi.unit_price_cents) / 100.0 |
+|---|---|---|
+| Thomas | Patel | 1941.89 |
+| Mary | Williams | 1631.94 |
+| Wei | Baker | 859.9 |
+| Ananya | Kim | 677.93 |
+| Karen | Lee | 551.93 |
 
-### Q10. What is the total revenue in dollars for each store that has sales?
+### Q10. For each store that has sales, give the store name and its total revenue in dollars.
 *Difficulty: medium*
 
 ```sql
-SELECT s.store_name, SUM(oi.quantity * oi.unit_price_cents) / 100.0 AS revenue FROM stores s JOIN orders o ON s.store_id = o.store_id JOIN order_items oi ON o.order_id = oi.order_id WHERE o.status != 'cancelled' GROUP BY s.store_id ORDER BY revenue DESC;
+SELECT s.store_name, SUM(oi.quantity * oi.unit_price_cents) / 100.0 FROM stores s JOIN orders o ON s.store_id = o.store_id JOIN order_items oi ON o.order_id = oi.order_id WHERE o.status != 'cancelled' GROUP BY s.store_id ORDER BY SUM(oi.quantity * oi.unit_price_cents) DESC;
 ```
 
 Answer:
 
-| store_name | revenue |
+| store_name | SUM(oi.quantity * oi.unit_price_cents) / 100.0 |
 |---|---|
 | Madison Main | 2297.8 |
 | New York Main | 2091.87 |
@@ -183,35 +177,31 @@ Answer:
 | San Francisco Main | 299.97 |
 | Dallas Main | 139.94 |
 
-### Q11. Which supplier provides the most products?
+### Q11. What is the name of the supplier that provides the most products?
 *Difficulty: medium*
 
 ```sql
-SELECT su.supplier_name, COUNT(*) AS product_count FROM suppliers su JOIN products p ON su.supplier_id = p.supplier_id GROUP BY su.supplier_id ORDER BY product_count DESC LIMIT 1;
+SELECT su.supplier_name FROM suppliers su JOIN products p ON su.supplier_id = p.supplier_id GROUP BY su.supplier_id ORDER BY COUNT(*) DESC LIMIT 1;
+```
+
+Answer: **Blue Ridge Supply Co**
+
+### Q12. For each product category, what is the average review rating?
+*Difficulty: medium*
+
+```sql
+SELECT p.category, AVG(r.rating) FROM reviews r JOIN products p ON r.product_id = p.product_id GROUP BY p.category;
 ```
 
 Answer:
 
-| supplier_name | product_count |
+| category | AVG(r.rating) |
 |---|---|
-| Blue Ridge Supply Co | 8 |
-
-### Q12. What is the average review rating for each product category?
-*Difficulty: medium*
-
-```sql
-SELECT p.category, ROUND(AVG(r.rating), 2) AS avg_rating FROM reviews r JOIN products p ON r.product_id = p.product_id GROUP BY p.category ORDER BY avg_rating DESC;
-```
-
-Answer:
-
-| category | avg_rating |
-|---|---|
-| Clothing | 3.93 |
-| Sports & Outdoors | 3.67 |
-| Electronics | 3.64 |
-| Home & Kitchen | 3.43 |
-| Books | 3.22 |
+| Books | 3.2222222222222223 |
+| Clothing | 3.9285714285714284 |
+| Electronics | 3.6363636363636362 |
+| Home & Kitchen | 3.4285714285714284 |
+| Sports & Outdoors | 3.6666666666666665 |
 
 ### Q13. Which products have never been reviewed?
 *Difficulty: medium*
@@ -245,10 +235,10 @@ Answer:
 *Difficulty: medium*
 
 ```sql
-SELECT ROUND(AVG(julianday(delivered_date) - julianday(shipped_date)), 2) AS avg_days FROM shipments WHERE status = 'delivered';
+SELECT AVG(julianday(delivered_date) - julianday(shipped_date)) FROM shipments WHERE status = 'delivered';
 ```
 
-Answer: **3.63**
+Answer: **3.6333333333333333**
 
 ### Q15. How many unique customers placed at least one order in the second quarter (April to June) of 2026?
 *Difficulty: hard*
@@ -261,44 +251,44 @@ SELECT COUNT(DISTINCT o.customer_id) FROM orders o WHERE substr(o.order_date,7,4
 
 Answer: **15**
 
-### Q16. Which employees earn more than their manager?
+### Q16. List the first and last names of the employees who earn more than their manager.
 *Difficulty: hard*
 
 **Trap:** Needs a self-join on the employees table.
 
 ```sql
-SELECT e.first_name || ' ' || e.last_name AS employee, e.salary, m.first_name || ' ' || m.last_name AS manager, m.salary AS manager_salary FROM employees e JOIN employees m ON e.manager_id = m.employee_id WHERE e.salary > m.salary;
+SELECT e.first_name, e.last_name FROM employees e JOIN employees m ON e.manager_id = m.employee_id WHERE e.salary > m.salary;
 ```
 
 Answer:
 
-| employee | salary | manager | manager_salary |
-|---|---|---|---|
-| Sofia Mitchell | 82000 | Susan Singh | 78000 |
-| Kenji Brown | 84500 | Carlos Patel | 83000 |
+| first_name | last_name |
+|---|---|
+| Sofia | Mitchell |
+| Kenji | Brown |
 
-### Q17. Which customers have placed orders but never written a review?
+### Q17. List the first and last names of the customers who have placed orders but never written a review.
 *Difficulty: hard*
 
 ```sql
-SELECT DISTINCT c.first_name || ' ' || c.last_name AS customer FROM customers c JOIN orders o ON c.customer_id = o.customer_id WHERE c.customer_id NOT IN (SELECT customer_id FROM reviews) ORDER BY customer;
+SELECT DISTINCT c.first_name, c.last_name FROM customers c JOIN orders o ON c.customer_id = o.customer_id WHERE c.customer_id NOT IN (SELECT customer_id FROM reviews) ORDER BY c.last_name, c.first_name;
 ```
 
 Answer:
 
-| customer |
-|---|
-| Chloe Ali |
-| Daniel Allen |
-| Daniel Smith |
-| Elizabeth Smith |
-| Fatima Martinez |
-| Jessica Allen |
-| Karen Scott |
-| Mei Chen |
-| Michael Green |
-| Ravi Nelson |
-| Wei Baker |
+| first_name | last_name |
+|---|---|
+| Chloe | Ali |
+| Daniel | Allen |
+| Jessica | Allen |
+| Wei | Baker |
+| Mei | Chen |
+| Michael | Green |
+| Fatima | Martinez |
+| Ravi | Nelson |
+| Karen | Scott |
+| Daniel | Smith |
+| Elizabeth | Smith |
 
 ### Q18. What percentage of all orders were cancelled?
 *Difficulty: hard*
@@ -306,12 +296,12 @@ Answer:
 **Trap:** Integer division trap: without 100.0 the result rounds to 0.
 
 ```sql
-SELECT ROUND(100.0 * SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) / COUNT(*), 2) AS cancelled_pct FROM orders;
+SELECT 100.0 * SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) / COUNT(*) FROM orders;
 ```
 
 Answer: **20.0**
 
-### Q19. Which product category generated the most revenue, and how much in dollars?
+### Q19. What is the product category that generated the most revenue, and how much revenue in dollars?
 *Difficulty: hard*
 
 ```sql
@@ -324,30 +314,30 @@ Answer:
 |---|---|
 | Home & Kitchen | 4054.75 |
 
-### Q20. For each store that has orders, which employee handled the most orders there?
+### Q20. For each store that has orders, list the store name and the first and last names of the employee who handled the most orders there. If employees tie, list all of them.
 *Difficulty: hard*
 
 **Trap:** Top-1 per group. Ties are kept, so a store can list more than one employee.
 
 ```sql
-WITH counts AS (SELECT o.store_id, o.employee_id, COUNT(*) AS n FROM orders o GROUP BY o.store_id, o.employee_id), ranked AS (SELECT *, RANK() OVER (PARTITION BY store_id ORDER BY n DESC) AS rk FROM counts) SELECT s.store_name, e.first_name || ' ' || e.last_name AS employee, r.n AS orders_handled FROM ranked r JOIN stores s ON r.store_id = s.store_id JOIN employees e ON r.employee_id = e.employee_id WHERE r.rk = 1 ORDER BY s.store_id, employee;
+WITH counts AS (SELECT o.store_id, o.employee_id, COUNT(*) AS n FROM orders o GROUP BY o.store_id, o.employee_id), ranked AS (SELECT *, RANK() OVER (PARTITION BY store_id ORDER BY n DESC) AS rk FROM counts) SELECT s.store_name, e.first_name, e.last_name FROM ranked r JOIN stores s ON r.store_id = s.store_id JOIN employees e ON r.employee_id = e.employee_id WHERE r.rk = 1 ORDER BY s.store_id, e.last_name, e.first_name;
 ```
 
 Answer:
 
-| store_name | employee | orders_handled |
+| store_name | first_name | last_name |
 |---|---|---|
-| New York Main | Arjun Tanaka | 2 |
-| Brooklyn Main | Barbara Ali | 3 |
-| Brooklyn Main | Ravi Khan | 3 |
-| Chicago Main | Daniel Tanaka | 1 |
-| Chicago Main | Elizabeth Hall | 1 |
-| Madison Main | John Patel | 3 |
-| Milwaukee Main | Aisha Patel | 1 |
-| Milwaukee Main | Arjun Walker | 1 |
-| Milwaukee Main | Michael Martinez | 1 |
-| Milwaukee Main | Olivia Walker | 1 |
-| Austin Main | Karen Mitchell | 4 |
-| Austin Main | Richard Martinez | 4 |
+| New York Main | Arjun | Tanaka |
+| Brooklyn Main | Barbara | Ali |
+| Brooklyn Main | Ravi | Khan |
+| Chicago Main | Elizabeth | Hall |
+| Chicago Main | Daniel | Tanaka |
+| Madison Main | John | Patel |
+| Milwaukee Main | Michael | Martinez |
+| Milwaukee Main | Aisha | Patel |
+| Milwaukee Main | Arjun | Walker |
+| Milwaukee Main | Olivia | Walker |
+| Austin Main | Richard | Martinez |
+| Austin Main | Karen | Mitchell |
 
 *...and 4 more rows (16 total).*

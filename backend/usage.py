@@ -20,7 +20,7 @@ import time
 import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 from backend.config import LLM_PRICES
 
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS feedback (
 CREATE TABLE IF NOT EXISTS issues (
     id TEXT PRIMARY KEY,
     source TEXT NOT NULL,               -- eval | user_report | sql_error
-    key TEXT NOT NULL UNIQUE,           -- source + question: the same failure again updates this issue
+    key TEXT NOT NULL UNIQUE,           -- source (+ eval run) + question: the same failure again updates this issue
     question TEXT NOT NULL,
     question_id TEXT,
     details TEXT NOT NULL,              -- JSON: what failed (SQL, error, comment, correct answer...)
@@ -88,6 +88,12 @@ CREATE INDEX IF NOT EXISTS agent_steps_issue ON agent_steps (issue_id);
 """
 
 ISSUE_SOURCES = ("eval", "user_report", "sql_error")
+
+
+def issue_key(source: str, question: str, run_id: Optional[str] = None) -> str:
+    """The same failure again updates its issue: same source, question (and eval run, if any)."""
+    norm = " ".join(question.lower().split())
+    return f"{source}:{run_id}:{norm}" if run_id else f"{source}:{norm}"
 ISSUE_STATUSES = ("new", "investigating", "report_ready", "approved", "rejected", "failed")
 
 
@@ -108,6 +114,10 @@ class UsageStore:
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(SCHEMA)
+        # Version-15: eval issues belong to the evaluation run that found them (older databases lack the column)
+        if "run_id" not in {r["name"] for r in self._conn.execute("PRAGMA table_info(issues)")}:
+            self._conn.execute("ALTER TABLE issues ADD COLUMN run_id TEXT")
+            self._conn.commit()
         self._lock = threading.Lock()
         # an investigation can't survive a restart: let it be started again
         self._write("UPDATE issues SET status = 'new' WHERE status = 'investigating'")
@@ -166,6 +176,12 @@ class UsageStore:
         details = getattr(usage, "completion_tokens_details", None)
         reasoning = getattr(details, "reasoning_tokens", 0) or 0
         price_in, price_out, cost = call_cost(model, input_tokens, output_tokens)
+        # OpenRouter reports what the call really cost (it depends on the host that served it)
+        reported = getattr(usage, "cost", None)
+        if reported is None:
+            reported = (getattr(usage, "model_extra", None) or {}).get("cost")
+        if isinstance(reported, (int, float)):
+            cost = float(reported)
         self._write(
             "INSERT INTO llm_calls (question_id, stage, round, model, input_tokens, output_tokens, reasoning_tokens,"
             " latency_ms, status, price_in, price_out, cost, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -295,18 +311,21 @@ class UsageStore:
 
     # ---------- issues: failures for the Failure Analyst agent (Version-11) ----------
 
-    def add_issue(self, source: str, question: str, details: Dict, question_id: Optional[str] = None) -> str:
+    def add_issue(
+        self, source: str, question: str, details: Dict, question_id: Optional[str] = None, run_id: Optional[str] = None,
+    ) -> str:
         """
         A failure to investigate: a wrong eval answer, a user's report, or SQL that SQLite
         rejected. The same failure again (same source and question) updates the open issue
-        and makes it new again, instead of adding a copy.
+        and makes it new again, instead of adding a copy. An eval failure from a run (run_id)
+        belongs to that run: the same question in another run is its own issue.
         """
         if source not in ISSUE_SOURCES:
             raise ValueError(f"source must be one of {ISSUE_SOURCES}")
         if not question.strip() and question_id:
             rows = self._read("SELECT question FROM questions WHERE id = ?", (question_id,))
             question = rows[0][0] if rows else ""
-        key = f"{source}:{question_id or ' '.join(question.lower().split())}"
+        key = issue_key(source, question_id or question, run_id)
         found = self._read("SELECT id FROM issues WHERE key = ?", (key,))
         details_json = json.dumps(details, ensure_ascii=False, default=str)
         if found:
@@ -319,15 +338,32 @@ class UsageStore:
             return issue_id
         issue_id = uuid.uuid4().hex[:10]
         self._write(
-            "INSERT INTO issues (id, source, key, question, question_id, details, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (issue_id, source, key, question.strip(), question_id, details_json, now(), now()),
+            "INSERT INTO issues (id, source, key, question, question_id, details, run_id, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (issue_id, source, key, question.strip(), question_id, details_json, run_id, now(), now()),
         )
         return issue_id
 
-    def issues(self, page: int = 1, source: str = "", status: str = "") -> Dict:
-        """Issues, newest first, 10 per page, with counts per source and per status (for the filters)."""
+    def issues(
+        self, page: int = 1, source: str = "", status: str = "", scope: Sequence[str] = (), run: Optional[str] = None,
+    ) -> Dict:
+        """
+        Issues, newest first, 10 per page, with counts per source and per status (for the filters).
+        scope: the sources this view shows (the Dashboard: user reports and SQL errors; Evaluation:
+        eval failures); the counts cover only those.
+        run: only the issues of this evaluation run ("none": eval issues logged without a run).
+        """
         conditions, params = [], ()
+        scoped, scope_params = "", ()
+        if scope:
+            scoped = f"source IN ({', '.join('?' for _ in scope)})"
+            scope_params = tuple(scope)
+        if run:
+            scoped = " AND ".join(filter(None, [scoped, "run_id IS NULL" if run == "none" else "run_id = ?"]))
+            scope_params += () if run == "none" else (run,)
+        if scoped:
+            conditions.append(scoped)
+            params += scope_params
         if source:
             conditions.append("source = ?")
             params += (source,)
@@ -344,9 +380,27 @@ class UsageStore:
         )
         return {
             "items": [self._issue_row(r) for r in rows], "page": page, "pages": pages, "total": total,
-            "by_source": dict(self._read("SELECT source, COUNT(*) FROM issues GROUP BY source")),
-            "by_status": dict(self._read("SELECT status, COUNT(*) FROM issues GROUP BY status")),
+            "by_source": dict(self._read(f"SELECT source, COUNT(*) FROM issues {'WHERE ' + scoped if scoped else ''} GROUP BY source", scope_params)),
+            "by_status": dict(self._read(f"SELECT status, COUNT(*) FROM issues {'WHERE ' + scoped if scoped else ''} GROUP BY status", scope_params)),
         }
+
+    def calls_for(self, question_id: str) -> Dict:
+        """LLM calls, tokens and cost recorded under one tag (an evaluation question, Version-14)."""
+        row = self._read(
+            "SELECT COUNT(*), COALESCE(SUM(input_tokens + output_tokens), 0), COALESCE(SUM(cost), 0) "
+            "FROM llm_calls WHERE question_id = ?", (question_id,)
+        )[0]
+        return {"llm_calls": row[0], "tokens": row[1], "cost": round(row[2], 6)}
+
+    def issue_ids_for(self, source: str, questions: Sequence[str], run_id: Optional[str] = None) -> Dict[str, Dict]:
+        """The issue (id, status) logged for each of these questions (in this run), keyed by question."""
+        keys = {issue_key(source, q, run_id): q for q in questions}
+        if not keys:
+            return {}
+        rows = self._read(
+            f"SELECT key, id, status FROM issues WHERE key IN ({', '.join('?' for _ in keys)})", tuple(keys)
+        )
+        return {keys[r["key"]]: {"id": r["id"], "status": r["status"]} for r in rows}
 
     def issue(self, issue_id: str) -> Optional[Dict]:
         """One issue with everything the agent did on it, in order."""
@@ -358,9 +412,38 @@ class UsageStore:
         )
         return {**self._issue_row(rows[0]), "steps": [dict(s) for s in steps]}
 
-    def new_issue_ids(self, limit: int) -> List[str]:
-        """The oldest issues nobody has investigated yet."""
-        return [r[0] for r in self._read("SELECT id FROM issues WHERE status = 'new' ORDER BY created_at LIMIT ?", (limit,))]
+    def new_issue_ids(self, limit: int, scope: Sequence[str] = (), run: Optional[str] = None) -> List[str]:
+        """The oldest issues nobody has investigated yet (only these sources, and this eval run, if given)."""
+        scoped = f" AND source IN ({', '.join('?' for _ in scope)})" if scope else ""
+        params = tuple(scope)
+        if run:
+            scoped += " AND run_id IS NULL" if run == "none" else " AND run_id = ?"
+            params += () if run == "none" else (run,)
+        return [r[0] for r in self._read(
+            f"SELECT id FROM issues WHERE status = 'new'{scoped} ORDER BY created_at LIMIT ?", params + (limit,)
+        )]
+
+    def issue_counts_by_run(self) -> Dict[str, Dict[str, int]]:
+        """Eval issues per run ("none": logged without a run): how many, and how many are new."""
+        rows = self._read(
+            "SELECT COALESCE(run_id, 'none') AS run, COUNT(*) AS total, SUM(status = 'new') AS new "
+            "FROM issues WHERE source = 'eval' GROUP BY COALESCE(run_id, 'none')"
+        )
+        return {r["run"]: {"total": r["total"], "new": r["new"]} for r in rows}
+
+    def link_issues_to_run(self, run_id: str, questions: Sequence[str], since: str) -> int:
+        """
+        Eval issues a run logged before issues had run ids: the same questions, logged during
+        the run, without a run. Moves them to the run (once), so they appear under it.
+        """
+        moved = 0
+        for question in questions:
+            old, new = issue_key("eval", question), issue_key("eval", question, run_id)
+            rows = self._read("SELECT id FROM issues WHERE key = ? AND run_id IS NULL AND updated_at >= ?", (old, since))
+            if rows and not self._read("SELECT 1 FROM issues WHERE key = ?", (new,)):
+                self._write("UPDATE issues SET run_id = ?, key = ? WHERE id = ?", (run_id, new, rows[0]["id"]))
+                moved += 1
+        return moved
 
     def start_investigation(self, issue_id: str) -> bool:
         """Marks an issue as being investigated, with a clean slate; False if it already is."""

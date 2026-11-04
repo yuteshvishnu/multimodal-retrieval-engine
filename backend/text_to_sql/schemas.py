@@ -18,6 +18,7 @@ class QueryResponse(BaseModel):
     safety: Optional[str] = None      # set when the request was blocked as a possible write (Version-7)
     limit: Optional[str] = None       # set when the query was too big or too slow (Version-8)
     failure_reason: Optional[str] = None  # the raw error when no query worked (Version-9)
+    rethink_meaning: Optional[str] = None  # the meaning asks for values the data doesn't have: ask it again
     row_count: int = 0                # rows kept (at most MAX_RESULT_ROWS); `rows` is only page 1
     more: bool = False                # there were more rows than MAX_RESULT_ROWS
     page_size: int = 0

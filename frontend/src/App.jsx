@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { Icon } from "./components/ui.jsx";
+import { getJson } from "./api.js";
+import { AccuracyRing, Icon } from "./components/ui.jsx";
 import ScoutTab from "./tabs/ScoutTab.jsx";
 import ScribeTab from "./tabs/ScribeTab.jsx";
 import DashboardTab from "./tabs/DashboardTab.jsx";
 import ArchitectureTab from "./tabs/ArchitectureTab.jsx";
+import EvaluationTab from "./tabs/EvaluationTab.jsx";
 
 // Scribe (RAG) is hidden for now; set to true to bring its tab back
 const SHOW_SCRIBE = false;
@@ -14,6 +16,7 @@ const TABS = [
   { id: "sql", label: "Scout", hint: "Rexie Scout: ask your data (Text-to-SQL)", icon: "database" },
   { id: "dashboard", label: "Dashboard", hint: "LLM calls, tokens, time and cost of every question", icon: "chart" },
   { id: "architecture", label: "Architecture", hint: "How Scout is built, and what each version changed", icon: "arch" },
+  { id: "evaluation", label: "Evaluation", hint: "How accurate Scout is on the BIRD benchmark", icon: "target" },
 ];
 
 const THEMES = [
@@ -33,6 +36,13 @@ function savedTheme() {
 export default function App() {
   const [active, setActive] = useState(SHOW_SCRIBE ? "rag" : "sql");
   const [theme, setTheme] = useState(savedTheme);
+  const [score, setScore] = useState(null); // the latest benchmark run, for the ring by the name
+
+  function loadScore() {
+    getJson("/api/eval/summary").then(setScore).catch(() => setScore(null));
+  }
+
+  useEffect(loadScore, []);
 
   // "system" follows the OS setting; light/dark override it (see styles.css)
   useEffect(() => {
@@ -54,6 +64,21 @@ export default function App() {
               <Icon name="sparkle" size={16} />
             </span>
             <span className="brand-name">Rexie</span>
+            {score && (
+              <button
+                type="button"
+                className="brand-score"
+                onClick={() => setActive("evaluation")}
+                title={`${score.benchmark}: ${score.correct} of ${score.total} right${score.sample ? " (sample data)" : ""}. Open Evaluation.`}
+              >
+                <AccuracyRing value={score.accuracy} size={24} stroke={3.5} />
+                <span className="brand-score-text">
+                  <small>{score.short || "BIRD"}</small>
+                  <b>{score.accuracy == null ? "not run" : `${score.accuracy}%`}</b>
+                </span>
+                {score.sample && <span className="brand-score-sample">sample</span>}
+              </button>
+            )}
           </div>
 
           <div className="topbar-actions">
@@ -104,6 +129,9 @@ export default function App() {
         </div>
         <div hidden={active !== "architecture"}>
           <ArchitectureTab />
+        </div>
+        <div hidden={active !== "evaluation"}>
+          <EvaluationTab active={active === "evaluation"} onRunFinished={loadScore} />
         </div>
       </main>
     </>

@@ -86,7 +86,20 @@ function formatCost(value) {
   return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(3)}`;
 }
 
-export default function IssuesView({ active }) {
+// Which issues a view shows: the Dashboard shows what users hit (reports, SQL errors);
+// Evaluation shows the eval's wrong answers. One source -> no source tabs.
+const DASHBOARD_SCOPE = ["user_report", "sql_error"];
+
+export default function IssuesView({
+  active,
+  scope = DASHBOARD_SCOPE,
+  run = "", // Version-15: only this evaluation run's issues
+  header = null, // shown above the agent intro (Evaluation: the run picker)
+  title = "Find out why it failed.",
+  intro = "Every failure users hit in Scout (their reports and SQL that SQLite keeps rejecting), investigated by an AI agent that explains what went wrong and suggests a fix.",
+  empty = <>Issues appear when a user clicks <strong>Report issue</strong>, or when SQLite keeps rejecting Scout's SQL. Eval failures are under <strong>Evaluation</strong>.</>,
+}) {
+  const sources = SOURCES.filter((s) => !s.id || scope.includes(s.id));
   const [list, setList] = useState(null);
   const [source, setSource] = useState("");
   const [status, setStatus] = useState("");
@@ -95,15 +108,15 @@ export default function IssuesView({ active }) {
 
   async function load(page = list?.page || 1, nextSource = source, nextStatus = status) {
     try {
-      setList(await getJson("/api/issues", { page, source: nextSource, status: nextStatus }));
+      setList(await getJson("/api/issues", { page, source: nextSource, status: nextStatus, scope: scope.join(","), run }));
     } catch (err) {
       setError(`Could not load the issues: ${err.message}`);
     }
   }
 
   useEffect(() => {
-    if (active) load();
-  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (active) load(1);
+  }, [active, run]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // while the agent works on anything shown, keep the list's statuses fresh
   const running = list?.items.some((i) => i.status === "investigating");
@@ -117,7 +130,7 @@ export default function IssuesView({ active }) {
     setBusy(true);
     setError("");
     try {
-      const { started } = await postForm("/api/issues/investigate-new", {});
+      const { started } = await postForm("/api/issues/investigate-new", { scope: scope.join(","), run });
       if (started.length === 0) setError("No new issues to investigate.");
       await load();
     } catch (err) {
@@ -134,8 +147,8 @@ export default function IssuesView({ active }) {
     <>
       <div className="page-header page-header-row">
         <div>
-          <h1>Find out why it failed.</h1>
-          <p>Every failure Scout logs, investigated by an AI agent that explains what went wrong and suggests a fix.</p>
+          <h1>{title}</h1>
+          <p>{intro}</p>
         </div>
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => load()}>
           <Icon name="refresh" size={14} />
@@ -143,6 +156,7 @@ export default function IssuesView({ active }) {
         </button>
       </div>
 
+      {header}
       <AgentIntro agent={agent} />
 
       {error && <ErrorAlert message={error} />}
@@ -159,8 +173,9 @@ export default function IssuesView({ active }) {
           </div>
 
           <div className="card-body issue-filters">
+            {sources.length > 2 && (
             <div className="tabs" role="group" aria-label="Source">
-              {SOURCES.map((s) => (
+              {sources.map((s) => (
                 <button
                   key={s.id}
                   type="button"
@@ -176,6 +191,7 @@ export default function IssuesView({ active }) {
                 </button>
               ))}
             </div>
+            )}
             <select
               className="select"
               value={status}
@@ -197,7 +213,7 @@ export default function IssuesView({ active }) {
               className="btn btn-primary btn-sm issue-batch"
               onClick={investigateNew}
               disabled={busy || newCount === 0 || !agent?.ready}
-              title={agent?.ready ? "" : "Set GROQ_API_KEY to run the agent"}
+              title={agent?.ready ? "" : "Set the LLM API key in .env to run the agent"}
             >
               <Icon name="agent" size={14} />
               Investigate all new{newCount ? ` (${Math.min(newCount, agent?.batch || 5)})` : ""}
@@ -207,10 +223,7 @@ export default function IssuesView({ active }) {
           {list.items.length === 0 && (
             <div className="empty">
               <h3>{source || status ? "No issues match" : "No issues yet"}</h3>
-              <p>
-                Issues appear when Scout fails: a wrong answer in the eval script, a user's{" "}
-                <strong>Report issue</strong>, or SQL that SQLite keeps rejecting.
-              </p>
+              <p>{empty}</p>
             </div>
           )}
 
@@ -360,6 +373,8 @@ function IssueDetail({ id, ready, onChange }) {
 
   const canInvestigate = ["new", "failed", "rejected"].includes(issue.status);
   const fix = issue.report && FIX[issue.report.fix_type];
+  // Version-18: a fix that changes Scout is never applied from a BIRD question (it would teach Scout the test)
+  const benchmarkLocked = issue.details?.suite === "bird_minidev" && ["error_book", "table_description"].includes(issue.report?.fix_type);
   return (
     <div className="issue-detail">
       <FailureSection issue={issue} />
@@ -394,7 +409,19 @@ function IssueDetail({ id, ready, onChange }) {
       {issue.status === "report_ready" && (
         <section className="issue-section issue-decision">
           <h4>Your decision</h4>
-          {fix && (
+          {fix && benchmarkLocked && (
+            <div className="approve-effect">
+              <span className={`fix-tag ${issue.report.fix_type}`}>{fix.label}</span>
+              <p>
+                <strong>Can't be approved: </strong>
+                this question is from BIRD, and the fix was found by looking at BIRD's correct answer. Applying it
+                would teach Scout the test and inflate its BIRD score. Use the report to see what went wrong, then fix
+                that in general.
+              </p>
+              <p className="muted small">Reject keeps your note so you remember why.</p>
+            </div>
+          )}
+          {fix && !benchmarkLocked && (
             <div className="approve-effect">
               <span className={`fix-tag ${issue.report.fix_type}`}>{fix.label}</span>
               <p>
@@ -406,7 +433,7 @@ function IssueDetail({ id, ready, onChange }) {
           )}
           <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" rows={2} />
           <div className="review-actions">
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => act("approve", { note })} disabled={busy}>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => act("approve", { note })} disabled={busy || benchmarkLocked}>
               <Icon name="check" size={14} />
               {fix?.button || "Approve"}
             </button>

@@ -9,7 +9,7 @@ import json
 import re
 from typing import List, Optional
 
-from backend.config import GROQ_API_KEY, GROQ_MODEL_SQL
+from backend.config import LLM_API_KEY, LLM_MODEL_SQL
 from backend.llm import chat, make_client
 
 MAX_STEPS = 8
@@ -22,6 +22,10 @@ SYSTEM_PROMPT = (
     "One action per step. Name the data in everyday words (orders, customers, stores, the order date, "
     "the employee); never use table or column names like order_date or employee_id, and no code formatting. "
     "Follow the meaning the user confirmed exactly; never add filters, columns or details it doesn't ask for.\n"
+    # answer format (BIRD's convention): an evaluation compares the result's columns exactly
+    "The last step shows only what the question asks for, as it's stored: no ids, extra counts or "
+    "other extras, first and last names kept as two separate values, and numbers not rounded, unless "
+    "the question asks for them. Never write 'optionally': decide.\n"
     "Never plan to change, add or delete data: only read it.\n"
     'Return only JSON: {"steps": ["step 1 text", "step 2 text", ...]}'
 )
@@ -31,8 +35,8 @@ class StepPlanner:
     """Turns a confirmed meaning into steps the user can check (1 LLM call per try)."""
 
     def __init__(self):
-        self.api_key = GROQ_API_KEY
-        self.model_name = GROQ_MODEL_SQL
+        self.api_key = LLM_API_KEY
+        self.model_name = LLM_MODEL_SQL
         self.client = None
 
     def steps(
@@ -44,7 +48,7 @@ class StepPlanner:
             {"steps": [...], "comments": [{"step": 2, "comment": "..."}]}  (step numbers start at 1)
         """
         if not self.api_key:
-            raise RuntimeError("GROQ_API_KEY is not set.")
+            raise RuntimeError("The LLM API key is not set (LLM_PROVIDER and its key in .env).")
         if self.client is None:
             self.client = make_client(self.api_key)
 

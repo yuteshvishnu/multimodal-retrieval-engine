@@ -111,6 +111,8 @@ def _outcome(result: dict, waiting: str = "") -> str:
         return "blocked (write)"
     if result.get("limit"):
         return "too heavy"
+    if result.get("rethink_meaning"):
+        return "waiting for meaning"  # the app asks the meaning again with the values the data has
     if result.get("error"):
         return "failed"
     return waiting or "answered"

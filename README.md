@@ -16,6 +16,7 @@ Rexie answers questions **only from our own data**. It's one app with two produc
 ## Contents
 
 - [Goal](#goal)
+- [Roadmap: What's Next](#roadmap-whats-next)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
 - [Product-1: Rexie Scribe (RAG)](#product-1-rexie-scribe-rag)
@@ -34,6 +35,12 @@ Rexie answers questions **only from our own data**. It's one app with two produc
   - [Version-10: Check the Steps, Rate the Answer](#version-10-check-the-steps-rate-the-answer)
   - [Version-11: Failure Analyst (an AI Agent)](#version-11-failure-analyst-an-ai-agent)
   - [Version-12: Reuse Recent Answers](#version-12-reuse-recent-answers)
+  - [Version-13: Evaluation Tab (sample data for now)](#version-13-evaluation-tab-sample-data-for-now)
+  - [Version-14: Run an Evaluation from the App, Live](#version-14-run-an-evaluation-from-the-app-live)
+  - [Version-15: Issues by Evaluation Run](#version-15-issues-by-evaluation-run)
+  - [Version-16: Choose the LLM Provider (Groq or OpenRouter)](#version-16-choose-the-llm-provider-groq-or-openrouter)
+  - [Version-17: BIRD Answer Format and Data-Checked Meanings](#version-17-bird-answer-format-and-data-checked-meanings)
+  - [Version-18: BIRD Mini-Dev, Ready to Run](#version-18-bird-mini-dev-ready-to-run)
 - [The App (UI)](#the-app-ui)
 - [Dashboard (LLM Usage and Cost)](#dashboard-llm-usage-and-cost)
 - [Fixes](#fixes)
@@ -49,6 +56,88 @@ Build a personal, ChatGPT-like assistant that answers questions **only from the 
 
 ---
 
+## Roadmap: What's Next
+
+The open work, in the order we plan to take it. Nothing here is built yet; each item says what it means today and what's still to decide.
+
+### 1. Run the BIRD benchmark, and show the results in the UI
+
+**Today:** BIRD Mini-Dev (500 questions, 11 real databases) is downloaded and can be run from the Evaluation tab on any range of questions (Version-18), with no user (the first meaning and the steps are accepted). First check: questions 1–10 scored **5 of 10**. The next version focuses on getting better against the benchmark.
+
+**To do:**
+- Run Mini-Dev in ranges, then all 500, and score the same answers with BIRD's own scripts too (each run writes BIRD's prediction format).
+- Score **Execution Accuracy** (same rows as the correct SQL) and **Valid Efficiency Score** (how fast correct queries run), by difficulty.
+- Make the eval run the app's real flow: today it skips the steps check and picks the meaning with a hint a real user wouldn't have. Run with *no user* (accept the first meaning and the steps), and later with a simulated user that only knows BIRD's evidence.
+- Score per version (turn features on one at a time) to show what each version added.
+- Show it in the UI: a **Benchmarks** page with the score, per-difficulty results, cost and calls per question, and every failure linked to its issue.
+
+**To decide:** how many questions to run (each takes about 5-6 LLM calls), and which model.
+
+**Done so far:** the Evaluation tab and the score ring (Version-13), and running an evaluation from the app with live progress (Version-14), on our practice questions. Left: move to a provider without the 200K-tokens-a-day cap (e.g. OpenRouter), download BIRD Mini-Dev, and add it as a suite.
+
+### 2. Make the tags clear
+
+**Today:** tags and badges appear all over the app, with different shapes, colours and meanings:
+
+| Where | Tags today |
+|---|---|
+| Scout, Ask | Choices on each meaning option ("Cancelled orders: counted"), *Try 1 of 3*, confidence badge (high / medium / low), *Tables used* |
+| Scout, Tables | *Reviewed* / *Not reviewed*, the database name, row and column counts |
+| Dashboard, Usage | Outcome badge (*answered*, *answered (reused)*, *waiting for meaning*, *blocked*, *too heavy*, *failed*), counts |
+| Dashboard, Issues | Source (Eval / User report / SQL error, filled), fix type (outlined), status, *Broke at*, confidence, test result |
+| Architecture | Version tags (V1 to V12) |
+
+**To do:** list every tag and what it tells the reader; drop the ones that don't help; give each kind one look (state, category, count, version) used the same way everywhere; add a hover explanation or a small legend where the meaning isn't obvious.
+
+### 3. Point Rexie at professors and students
+
+**Today:** Rexie is written for a general "ask your data" user, and the practice data is a retail store.
+
+**To do:** reshape the product around teaching and research:
+- **Who:** professors (course and research data, grades, survey results) and students (learning to ask questions of data, and learning SQL by seeing the steps and the query).
+- **What changes:** example questions, practice data and wording for those users; the steps and the SQL as a learning aid ("how this was answered"); what each role can see and upload.
+
+**To decide:** the main use case first (course data for professors, a SQL learning tool for students, or research datasets), and whether Scribe (documents: papers, notes, syllabi) comes back for it.
+
+### 4. Let users upload their own data in a form they can use
+
+**Today:** the only way in is a `.sqlite` file (up to 200 MB) in the Tables view. Rexie writes a description per table and the user can correct it. A table name that already exists is refused.
+
+**To do:**
+- **More formats:** CSV and Excel (each sheet a table), maybe Google Sheets; Rexie infers column types, dates and units, and shows a preview before anything is saved.
+- **Make it usable for questions:** suggest column descriptions (dates, units, allowed values) for the owner to confirm, the way BIRD's description files work, since these are what stop the traps in Version-2.
+- **Manage what's there:** rename, replace or add rows to a table, remove a table (not only a whole database), see which tables a question used.
+- **Whose data:** each user's uploads are their own unless shared (needs item 5).
+
+### 5. Sign in, with a user view and a developer view
+
+**Today:** one shared view for everyone. The only protection is an optional single password (`APP_PASSWORD`, browser login).
+
+**To do:**
+- **Sign in** with real accounts (for a university, likely the school's own login).
+- **User view:** Ask, their own tables, their uploads, Report issue.
+- **Developer view:** everything above plus the Dashboard (usage, cost, issues), the Failure Analyst, Benchmarks and Architecture.
+- Questions, costs, issues and saved answers kept per user.
+
+### 6. Tables and databases: one clear place to manage data
+
+**Today:** the Tables view lists every table across every database, 10 per page, with search, previews and descriptions. Databases can be added or removed whole.
+
+**To do (with items 4 and 5):**
+- Group tables by database, show where each came from (uploaded file, date, owner) and how it links to other tables.
+- Let the owner choose which databases Scout searches for a question.
+- Show the descriptions as a clear "data dictionary" the owner can review in one place.
+- Show size limits and what Scout will refuse before an upload fails.
+
+### Also open
+
+- **Meanings can add filters** the question never asked for (Version-5's open issue).
+- **The eval is strict about columns:** a right answer with extra columns counts as wrong.
+- **Scribe's accuracy** (RAGAS 0.57) hasn't been worked on since Version-1.
+- **Issues with the same cause** aren't grouped yet, and approving a prompt fix doesn't change the prompt (a batched PR was discussed).
+
+---
+
 ## Project Structure
 
 ```
@@ -59,6 +148,8 @@ multimodal-retrieval-engine/
 │   ├── llm.py               # the one LLM client: time limit + retries; chat() records every call
 │   ├── usage.py             # Dashboard: every LLM call per question (tokens, time, cost) in SQLite
 │   ├── dashboard_api.py     #   /api/usage/... (summary, timeline, questions)
+│   ├── eval_api.py          #   Version-13: /api/eval/summary and /results for the Evaluation tab
+│   ├── eval_runner.py       #   Version-14: runs an evaluation in the background, one question at a time
 │   ├── issues_api.py        #   Version-11: /api/issues/... (issues, start the agent, approve / reject)
 │   ├── agent/               # Version-11: the Failure Analyst (an AI agent)
 │   │   ├── tools.py         #   its read-only tools (tables, column values, test queries, error book)
@@ -95,6 +186,7 @@ multimodal-retrieval-engine/
 │       ├── components/ui.jsx #  icons, loading, alerts, SQL highlighting, pager, data table
 │       └── styles.css       #   design tokens (light + dark), layout
 ├── data/
+│   ├── benchmarks/bird/     # Version-18: BIRD Mini-Dev as downloaded (git-ignored; outside text_to_sql/ on purpose)
 │   ├── rag/                 # Scribe: documents (raw_docs), built index, eval set
 │   └── text_to_sql/         # Scout: one folder per database
 │       ├── retail_store/    #   practice DB, descriptions, 20 questions + answers
@@ -349,16 +441,25 @@ Make the system as **accurate and efficient** as possible, and verify it on the 
 
 ```mermaid
 flowchart LR
-    Q["Question"] --> T["Pick relevant tables<br/>(embeddings, Version-3)"]
+    Q["Question"] --> C{"Asked before?<br/>(Version-12)"}
+    C --> T["Pick relevant tables<br/>(embeddings, Version-3)"]
     T --> M["User confirms the meaning<br/>(Version-5)"]
-    M --> S["3 SQL tries, checked and run<br/>(Version-4)"]
-    S --> A["Answer + SQL + confidence"]
+    M -- "picked a saved meaning" --> G
+    M --> P["User checks the steps<br/>(Version-10)"]
+    P --> S["3 SQL tries, compared<br/>(Version-4)"]
+    S --> G["Guards, then run<br/>read-only (V7) · size/time (V8) · error book (V9)"]
+    G --> A["Answer + steps + SQL"]
+    A -- "Report issue" --> I["Issue → Failure Analyst agent<br/>(Version-11)"]
 ```
 
-The UI has two views:
+Every stage reads the column descriptions (Version-2) and table descriptions (Version-3, fixable in Version-6). The **Architecture** tab in the app draws the full design, block by block, with the version that added each part.
 
-- **Ask:** type a question, pick what you mean, get the answer table (10 rows per page), the SQL, a confidence badge and every attempt.
+Scout has two views, and the app has two more pages:
+
+- **Ask:** type a question, pick what you mean, check the steps, then get the answer table (10 rows per page), the steps it followed, the SQL and a confidence badge. **Report issue** if it's wrong.
 - **Tables:** every table Rexie can query, what Rexie understands about each one (and a way to fix it), row previews, and **Add database** for new `.sqlite` files.
+- **Dashboard:** **Usage** (LLM calls, tokens, time and cost per question) and **Issues** (failures and the Failure Analyst's reports).
+- **Architecture:** how Scout is built and what each version changed.
 
 ### How We Built It
 
@@ -375,7 +476,15 @@ Each version fixed a problem the previous one exposed.
 | **Version-7:** Safety | A question or the LLM's SQL could change the database | Deterministic write checks on the question, the meaning and the SQL |
 | **Version-8:** Performance | A heavy query can be slow or return huge results | Size estimate before running, time limit, 200-row limit, paging from a cache |
 | **Version-9:** Error book | The model repeats SQL mistakes from other dialects, and retries can't fix them | Known SQLite errors → prompt rules + fix hints; log + report to grow it; early stop; clear failures |
-| **Version-10:** Steps and feedback | The user can't see or correct *how* an answer is built, and wrong answers leave no trace | The user checks the steps before the SQL is written; 👍 / 👎 on the answer, 👎 logged as an issue |
+| **Version-10:** Steps and feedback | The user can't see or correct *how* an answer is built, and wrong answers leave no trace | The user checks the steps before the SQL is written; a reported answer is logged as an issue |
+| **Version-11:** Failure Analyst | Failures sit in logs; each one needs someone to dig in | An AI agent investigates each failure with read-only tools; code tests its fix; the developer approves |
+| **Version-12:** Reuse recent answers | The same question in other words repeats every step and LLM call | The last 10 answers are saved; a close question offers the saved meaning first, and picking it re-runs the saved SQL; feedback is report-only |
+| **Version-13:** Evaluation tab | Accuracy lived in terminal output; eval failures were mixed with users' | A score ring by the name and an Evaluation tab (accuracy check + eval-only issues); sample data until BIRD is run |
+| **Version-14:** Run an evaluation live | Evals ran only in the terminal; long runs couldn't be watched, stopped or resumed | A Run button with an estimate; a live card (progress, accuracy so far, current stage, cost); stop / resume; rate-limit waits |
+| **Version-15:** Issues by run | Eval issues from every run were mixed, and a rerun overwrote earlier ones | Each run has an id; Evaluation → Issues picks a run from a dropdown, and the agent works on that run's issues |
+| **Version-16:** LLM provider | Groq's free plan allowed ~20 eval questions a day | `LLM_PROVIDER` picks Groq or OpenRouter; OpenRouter calls are pinned to Crusoe then Groq and priced at their real cost |
+| **Version-17:** BIRD answer format | 8 of 20 practice answers were marked wrong only for format (joined names, rounding, extra count); one meaning asked for a city spelling the data doesn't have | Practice answers rewritten in BIRD's format, the same rule in Scout's steps and SQL prompts; when the checks find a value the data lacks, the meaning is asked again with the real values (2 meanings at most) |
+| **Version-18:** BIRD Mini-Dev | BIRD wasn't downloaded; Scout scans every database in its folder, so BIRD would have leaked into the app | BIRD's files kept as downloaded, outside Scout's folder; each question gets a Scout with only its own database; runs pick questions *from–to*; BIRD's prediction format is written too; fixes from BIRD issues can't be approved. First 10 Mini-Dev questions: **5/10** |
 
 ---
 
@@ -453,6 +562,8 @@ Traps built into the data:
 - **Hidden date format:** `orders.order_date` is `MM/DD/YYYY`; every other date is `YYYY-MM-DD`.
 - **Units:** prices and amounts are stored in **cents**.
 - **Cancelled orders:** they must be excluded from revenue.
+
+Answers follow **BIRD's format** (Version-17): columns exactly as stored (`first_name`, `last_name`, not one joined name), only what the question asks for (no extra counts or ids), and no rounding unless asked. Questions say what to return ("What is the **name** of the store…"). Scoring stays strict: a result is right only if its rows match exactly. Before this, 8 of Scout's 20 answers were marked wrong only because the expected answers joined names, rounded or added a count column.
 
 #### Evaluation
 
@@ -846,6 +957,131 @@ read the failure → LLM picks a tool → our code runs it (read-only) → LLM r
 
 **Real run (6 LLM calls):** *"How many orders were placed in March 2026?"* → meaning, steps, answer: **3 orders**, high confidence, 5 calls, $0.0019. Then *"count the orders from march 2026"* → the saved meaning was option 1; picking it answered in **0.45 s with 0 SQL calls** (1 call in total, for the meanings), same 3 orders and steps, shown on the Dashboard as *answered (reused)*. That run found the repeated option, fixed above.
 
+
+### Version-13: Evaluation Tab (sample data for now)
+
+**Problem:** Scout's accuracy lived in terminal output from `evaluate.py`, and eval failures were mixed with users' failures in the Dashboard's Issues. There was nowhere to see *how good Scout is* at a glance.
+
+**What we built:**
+- **A score ring next to the name "Rexie"** in the header: the latest BIRD accuracy (e.g. *BIRD 70%*, with a *sample* mark while the data is a sample). Clicking it opens Evaluation.
+- **An Evaluation tab** (after Architecture) with two views:
+  - **Accuracy check:** a big ring with the score, *N of M right*, the benchmark, model, date and how the run answered (no user: first meaning and steps accepted); outcome counts (right, wrong rows, SQL error, no answer); accuracy by **difficulty** (simple / moderate / challenging); questions, LLM calls (and per question), cost. Then **every question**, filtered All / Right / Wrong, by difficulty and by search; a wrong one opens to the hint given with it, **Scout's SQL beside the correct SQL**, what each returned, calls, cost and confidence, and its **issue** (status, with a link to Issues).
+  - **Issues:** the same Issues view and Failure Analyst as the Dashboard, showing **only eval failures**.
+- **The Dashboard's Issues now shows only users' failures** (User report, SQL error). Each view asks the API for its own sources (`/api/issues?scope=...`), and the counts and "Investigate all new" cover only those.
+
+**Data:** `GET /api/eval/summary` and `GET /api/eval/results` (`backend/eval_api.py`) read the newest run in `data/text_to_sql/eval/runs/`. No real BIRD run exists yet, so they show **`data/text_to_sql/eval/sample_bird_run.json`**: 40 made-up questions in BIRD's format across its 11 dev databases (28 right, 70%), marked as sample on the page and on the ring. Totals are always worked out from the per-question results. The next step (Roadmap item 1) is a real BIRD run that writes a run file in the same format.
+
+**Tested:** 3 new tests: the sample shows until a real run exists, then the real run's totals, per-difficulty scores, calls and cost; results filter right / wrong, by difficulty and search, 10 per page, and a wrong answer links to its logged issue; eval issues and users' issues are listed apart, with their own counts and "investigate new". All 124 pass. Checked in the browser (the ring opens Evaluation; the #20 eval issue moved from the Dashboard to Evaluation → Issues) and at phone width (the four header tabs drop their icons to fit).
+
+
+### Version-14: Run an Evaluation from the App, Live
+
+**Problem:** an evaluation only ran from the terminal (`evaluate.py`), printed text, and couldn't be watched, paused or resumed. A BIRD run will take hours and hit rate limits.
+
+**What we built:** **Evaluation → Accuracy check → Run evaluation**:
+1. **Pick a test suite:** *Practice* (our 20 questions) now; *BIRD Mini-Dev* is listed but greyed out until it's downloaded.
+2. **Pick how many questions** (first 5, 10, 20, 50, or all) and see an **estimate** before starting: LLM calls, tokens, cost and minutes, with a warning when it's more than the provider's daily token limit.
+3. **Start**, then watch the **live card**: a progress bar (*7 of 20*), **accuracy so far** (a ring), elapsed time and time left, LLM calls, tokens and cost so far; **what it's doing now** (the question, and its stage: Meaning → Steps → SQL); a rate-limit pause with a countdown; and the **latest answers** as they land, ✓ / ✗ with time, calls and cost each. **Stop after this question**, **Resume** where it stopped, **Close** when done.
+4. When the run ends, it becomes the latest run: the scorecard, the question list and the ring by "Rexie" (now labelled with the suite, e.g. *Practice 75%*) update, and the sample notice goes away.
+
+**How it runs** (`backend/eval_runner.py`):
+- On the server, in a background thread, **one question at a time**, one run at a time; leaving the page doesn't stop it.
+- Each question goes through the app's flow with **no user**: the first meaning is taken, the steps are accepted as written, then SQL (3 tries, checks) as usual. Its rows are compared with the correct SQL's rows, in any order. BIRD questions will also get BIRD's evidence hint.
+- **Saved after every question** in `data/text_to_sql/eval/runs/<run>.json` (git-ignored), so a stopped or crashed run keeps its answers.
+- **Rate limits:** the API client already retries and honours "retry after"; if a question still hits the limit, the run waits 60 s and tries again (up to 3 times), then stops with a message to resume later.
+- Every LLM call is tagged `eval:<run>:<question>`, so each question's calls, tokens and cost are counted, while the Dashboard counts them as outside calls, not users' questions. Eval runs neither use nor fill the saved-answer cache (Version-12). Wrong answers become **Eval issues** for the Failure Analyst.
+- Endpoints: `GET /api/eval/suites`, `POST /api/eval/runs`, `GET /api/eval/runs/current` (polled every 1.5 s), `POST /api/eval/runs/{id}/stop`, `POST /api/eval/runs/{id}/resume`. Estimates come from measured averages in `config.py` (`EVAL_TOKENS_PER_QUESTION` and others).
+
+**Tested:** 5 new tests with a stand-in pipeline (no LLM): a run answers meaning → steps → SQL with the first meaning and no saved answers, scores right / wrong rows / SQL error, prices each question from its tagged calls, saves the run and logs 2 Eval issues; a rate-limited question waits and retries, and the run stops after 3 limited tries; Stop finishes the current question and Resume carries on; suites and estimates; the scorecard ignores a run still running. All 129 pass. The Run panel was checked in the browser; the first real run is yours to start.
+
+
+### Version-15: Issues by Evaluation Run
+
+**Problem:** Evaluation → Issues mixed every eval's wrong answers in one list, and the same question failing in two runs updated a single issue, so you couldn't tell which run an issue came from or point the agent at one run.
+
+**What we built:** every evaluation run has an **id** (e.g. `20261103-171422-f268`), and its wrong answers are **its issues**.
+- **Evaluation → Issues** starts with an **Evaluation run** dropdown: every finished (or stopped) run, newest first, as *Practice · Nov 3, 5:14 PM · 4/5 right (80%) · 1 issue (1 new)*, with the run id under it. A run appears there as soon as it ends; the newest is picked by default.
+- The issue list, its counts and **Investigate all new** cover only the chosen run, so the Failure Analyst works on that run's failures.
+- The same question wrong in two runs is **two issues**, one per run, so a later run never overwrites an earlier investigation.
+- Wrong answers logged by the command-line `evaluate.py` (which keeps no run) are listed as **From the command-line eval script**.
+- Issues from runs made before this change are moved under their run once, by matching the run's wrong questions.
+
+**Data:** the `issues` table has a `run_id` column (added automatically to existing databases); an eval issue's key includes its run. `GET /api/eval/runs` lists the finished runs with their issue counts; `/api/issues` and `/api/issues/investigate-new` take `run=<id>` (or `none`).
+
+**Tested:** 2 new tests: the same wrong question in two runs gives one issue per run, each listed and investigated only under its run, and runs are listed newest first with their scores; an issue logged before run ids moves under its run while a script's issue stays apart. All 131 pass. Checked in the browser with a real 5-question practice run (4/5 right; its wrong answer, *"Which store has the most employees?"*, shows under the run; the older #20 issue under *command-line eval script*).
+
+
+### Version-16: Choose the LLM Provider (Groq or OpenRouter)
+
+**Problem:** Groq's free plan allows 8K tokens a minute and 200K a day for `gpt-oss-120b`. One Scout question uses about 8K, so an evaluation managed about 20 questions a day, and calls slowed or failed on the per-minute limit. Groq's paid plan wasn't available.
+
+**What we built:** one setting in `.env`, `LLM_PROVIDER=groq` (default) or `openrouter`. Both serve the same model through the same OpenAI-style API, so only the address, the key and the limits change; every LLM call in the app (Scout, Scribe, table descriptions, the agent, evaluation runs) follows it.
+- **OpenRouter** (`OPENROUTER_API_KEY`, or `OPEN_ROUTER_API_KEY`): pay-as-you-go from credits, no daily token cap. Every call is **pinned** to `OPENROUTER_PROVIDERS` in `config.py`: **Crusoe** first ($0.05 / $0.25 per 1M tokens, full precision, ~250 tokens/s), then **Groq**, with fallback to any other host turned off, so a whole evaluation runs on the same setup. **Not CoreWeave**, though it's cheaper: tested for real, its `gpt-oss-120b` puts the model's thinking *inside* the JSON answer (`{"analysis": "We need to interpret..."}`) instead of returning it separately, so Scout found **no meanings** ("The model returned no meanings"). The same request on Crusoe and on Groq returned proper options.
+- **Exact cost:** OpenRouter reports each call's real cost, which the Dashboard records instead of the estimate from `LLM_PRICES` (prices are now kept per provider).
+- **Evaluation:** a run records the provider; the estimate says *via OpenRouter* and drops the 200K-a-day warning.
+- Names: `GROQ_API_KEY` / `GROQ_MODEL_*` in the code became `LLM_API_KEY` / `LLM_MODEL_*`; `.env.example` lists the new settings.
+
+**Safety:** set a low limit on the OpenRouter key (e.g. $5) and load only a few dollars of credit: a Mini-Dev run should cost under $1.
+
+**Tested:** 2 new tests: on OpenRouter every call carries the pinned hosts with no fallback and is priced by its reported cost; on Groq calls are sent unchanged. All 133 pass. Checked against OpenRouter for real with 4 tiny calls (about $0.001): CoreWeave failed as above; Crusoe and Groq worked.
+
+### Version-17: BIRD Answer Format and Data-Checked Meanings
+
+**Problem:** a practice run scored 12/20, but all 8 "wrong" answers had found the right records: the expected answers joined names (`first_name || ' ' || last_name`), rounded (`ROUND(..., 2)`) or added a count nobody asked for, and Scout didn't. After fixing the expected answers the next run scored **18/20**; the 2 left showed two more gaps:
+- **Q13** returned `product_id` with the product name: the steps said "*(and optionally the product identifier)*".
+- **Q7** ("How many customers live in New York City?"): the first meaning said *exactly 'New York City'*, a spelling the data doesn't have (it stores `New York`, `NY`, `NYC`, `new york`). The code check in `checks.py` **caught it on all 6 tries** and listed the real values, but the SQL step must follow the confirmed meaning, so it couldn't fix it. The run labelled it "SQL error", though SQLite never rejected anything.
+
+**What we built:**
+- **One answer format, BIRD's:** columns exactly as stored, only what the question asks for, no rounding or joining unless asked. The practice questions say what to return ("What is the **name** of the store…") and their answers were recomputed from the database; scoring stays strict (rows must match exactly). The same rule is in the **steps** prompt (`planner.py`, "never write 'optionally'") and the **SQL** prompt (`sql_generator.py`).
+- **Meaning prompt** (`interpreter.py`): a value named in the question is read the way the data stores it (from the column descriptions and listed values), never pinned to a spelling the data doesn't have.
+- **Back to the meaning when the data lacks a value:** if no SQL try worked and the checks found `<column> has no value '...'`, the answer comes back with `rethink_meaning` (the real values). The app shows that note and offers the meanings again, told the real values; an evaluation run does the same with no user. At most `MAX_MEANING_TRIES = 2` meanings in all; it's a fixed loop in code, not an agent.
+- **Clearer outcomes** in evaluation runs: **SQL error** (SQLite rejected it), **Failed checks** (valid SQL, but Scout's checks rejected every try), **Value not in data** (still missing after the second meaning).
+
+**Parked:** an LLM checklist after the SQL for traps code can't catch; only if BIRD shows such misses (it would also stop after 2 rounds).
+
+**Tested:** 3 new tests (the meaning is asked again once with the real values, then stops; the outcome says who rejected the SQL; the note built from the checks). All 136 pass. No LLM calls were made: the practice answers come from the database.
+
+### Version-18: BIRD Mini-Dev, Ready to Run
+
+**Problem:** BIRD wasn't on disk. Dropping it into `data/text_to_sql/` would have been wrong twice: Scout attaches **every** `.sqlite` file in that folder, so BIRD's 11 databases would have appeared in the app (and SQLite attaches at most 10 at once); and nothing stopped a fix learned from BIRD's correct answers being applied to Scout, which would make later BIRD scores too high.
+
+**What we built:**
+- **Downloaded as published:** `minidev.zip` (801 MB, SHA-256 `cc48ba16…`) from the link on [BIRD's Mini-Dev page](https://github.com/bird-bench/mini_dev), into `data/benchmarks/bird/` (git-ignored). Only the SQLite part is unzipped (`minidev/MINIDEV/`, 1.4 GB: `mini_dev_sqlite.json`, `mini_dev_sqlite_gold.sql`, `dev_databases/<db>/<db>.sqlite` + `database_description/`); the zip stays, and nothing in BIRD's files is changed. To set it up again:
+
+  ```bash
+  mkdir -p data/benchmarks/bird/download && curl -L -o data/benchmarks/bird/download/minidev.zip https://bird-bench.oss-cn-beijing.aliyuncs.com/minidev.zip
+  ```
+
+  ```bash
+  cd data/benchmarks/bird && unzip -q download/minidev.zip 'minidev/MINIDEV/*' -d .
+  ```
+
+- **Hidden from Scout until a run:** `data/benchmarks/` is outside `data/text_to_sql/`, so the app's Scout never sees BIRD's databases or questions (a test checks this; the Tables view still lists only the practice database).
+- **One database per question:** a BIRD question is answered by a Scout made over **only its own database** (`TextToSQLPipeline(data_dir=...)`), made when a run first needs that database and reused after. BIRD's databases have 3 to 13 tables (at most ~14K characters of schema with descriptions), so Scout gets the **whole schema**: no table search, and no LLM-written table summaries to build first. All 11 open in under 6 seconds with no LLM call.
+- **What Scout is given:** the question plus BIRD's **evidence** as a hint (BIRD's standard setting); the gold SQL is read **only** to score an answer after Scout has answered. Runs never use or fill the saved-answer cache (Version-12).
+- **Pick the questions:** *From* and *to* (1-based, in BIRD's own order), plus *First 5 / 10 / 20 / 50 / All*. A run records its range (e.g. 101–150). Each result keeps BIRD's own `question_id`.
+- **Scored two ways:** our score (same rows, any order, as BIRD's EX), and every BIRD run also writes **BIRD's official prediction format** to `data/text_to_sql/eval/runs/bird_predictions/<run>.json` (`{"<question_id>": "<sql>\t----- bird -----\t<db_id>"}`), so BIRD's own `evaluation_ex.py` / Soft F1 / R-VES scripts can score exactly the same answers.
+- **Issues from BIRD:** the agent investigates them on that question's database, but a fix that changes Scout (error book, table description) **can't be approved** for a BIRD question: it was found by looking at BIRD's correct answer, so it would teach Scout the test (and a description note would be written into BIRD's files). The Approve button explains this; "to-do" fixes, which change nothing, can still be approved.
+- **Fixed on the way:** some BIRD foreign keys don't name the column they point to (SQLite then means the primary key); the schema builder crashed on them and now writes just the table.
+
+**Watch on the first runs:** Scout's limits were set for small data: a query estimated to read over 1M rows is refused as too heavy, and queries stop after 5 seconds. BIRD's biggest databases (European football, codebase community, card games) may hit them.
+
+**First check on BIRD (Mini-Dev questions 1–10):** with the evaluation section adjusted (BIRD as a suite, a *from–to* range, one database per question), Scout was run on the **first 10 Mini-Dev questions** (all from `debit_card_specializing`) through OpenRouter, with no user: **5 of 10 right (50%)**, 57 LLM calls (5.7 per question), $0.013. The practice set, run just before with the Version-17 changes, scored **20 of 20**.
+
+| Practice set: 20 of 20 | BIRD Mini-Dev, first 10: 5 of 10 |
+|---|---|
+| ![Practice set: 20 of 20 right](data/screenshorts/test-set-score-latest-version.png) | ![BIRD Mini-Dev first 10 questions: 5 of 10 right](data/screenshorts/bird-mini-dev-test-first-10-check.png) |
+
+What the 5 misses show (a first look, for the next version):
+- **Q3, no answer:** a read-only question was **blocked as a write**: the meaning said "*Add* together all consumption values…", and the safety check read "add" as a data change. A false alarm in our own check.
+- **Q10, missed filter:** "How many more *discount* gas stations…" — Scout's SQL never filtered on the Discount segment (3956 instead of 176). A real meaning/SQL mistake.
+- **Q6, format:** Scout returned the month as `201304`; BIRD's answer is `04`.
+- **Q7, Q8 (challenging):** Scout's numbers differ from BIRD's, and BIRD's own SQL for these looks doubtful (Q7's expected answer starts with 0.0); worth checking by hand before blaming Scout.
+
+**Next version: get better on the benchmark.** Run more of Mini-Dev in ranges, sort the misses into Scout's mistakes, our checks' false alarms (like Q3) and doubtful BIRD answers, and fix them in general (never from BIRD's answers, see above).
+
+**Tested:** 6 new tests on a tiny fake BIRD folder in BIRD's layout (questions read from BIRD's fields; one Scout per database; evidence as the hint and the gold SQL never in what Scout is asked; BIRD's prediction format; the from–to range and bad ranges; BIRD fixes refused) and one that BIRD stays outside Scout's folder. All 141 pass. No evaluation or LLM call was run.
+
 ---
 
 ## The App (UI)
@@ -854,10 +1090,10 @@ Both products share one React app, designed to look like a finished product inst
 
 | Before | After |
 |---|---|
-| Plain page, browser-default inputs | App header with a product switch (**Scribe** / **Scout**), each with its own views; cards with consistent spacing and type (Inter) |
+| Plain page, browser-default inputs | App header with tabs (**Scout** / **Dashboard** / **Architecture**; Scribe is hidden for now), each with its own views; cards with consistent spacing and type (Inter) |
 | Status as plain text | Spinners while working, red/amber alert boxes for errors and warnings |
 | — | Empty state with **example questions** you can click |
-| Text-to-SQL flow implicit | **Step bar**: Ask → Confirm meaning → Answer |
+| Text-to-SQL flow implicit | **Step bar**: Ask → Confirm meaning → Check steps → Answer |
 | Options as plain radio list | Selectable option cards, choices shown as tags |
 | One line of stats | Stat strip: rows, **confidence badge**, LLM calls, tables used |
 | Plain table | Sticky header, row numbers, numbers right-aligned, NULLs greyed out, 10 rows per page |

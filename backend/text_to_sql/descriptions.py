@@ -64,8 +64,10 @@ def annotated_schema(
     for table in tables:
         # cid, name, type, notnull, default, pk
         columns = conn.execute(f'PRAGMA "{alias}".table_info("{table}")').fetchall()
+        # a foreign key may leave out the column it points to (it then means that table's
+        # primary key, as in some BIRD databases): write just the table then
         foreign_keys = {
-            fk[3]: f"{_quote(fk[2])}({_quote(fk[4])})"
+            fk[3]: f"{_quote(fk[2])}({_quote(fk[4])})" if fk[4] else _quote(fk[2])
             for fk in conn.execute(f'PRAGMA "{alias}".foreign_key_list("{table}")')
         }
         pk_columns = [col[1] for col in sorted(columns, key=lambda c: c[5]) if col[5]]

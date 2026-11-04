@@ -144,7 +144,7 @@ class FailureAnalyst:
 
     def _investigate(self, issue_id: str) -> None:
         if self.client is None:
-            raise RuntimeError("GROQ_API_KEY is not set.")
+            raise RuntimeError("The LLM API key is not set (LLM_PROVIDER and its key in .env).")
         issue = self.store.issue(issue_id)
         text = failure_text(issue)
         self.store.add_agent_step(issue_id, "start", f"Read the failure ({SOURCE_LABELS[issue['source']]})", text)

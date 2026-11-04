@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.config import APP_PASSWORD
 from backend.dashboard_api import router as dashboard_router
+from backend.eval_api import router as eval_router
 from backend.issues_api import router as issues_router
 from backend.rag.api import router as rag_router
 from backend.text_to_sql.api import router as sql_router
@@ -38,6 +39,7 @@ async def require_password(request: Request, call_next):
 app.include_router(rag_router)
 app.include_router(sql_router)
 app.include_router(dashboard_router)
+app.include_router(eval_router)
 app.include_router(issues_router)
 
 

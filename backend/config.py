@@ -12,14 +12,37 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 # also puts the keys in os.environ, for libraries that read them directly
 load_dotenv(ROOT_DIR / ".env")
 
-# Groq: RAG answers and Text-to-SQL
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+# Which company runs the LLM (Version-16). Both speak the same OpenAI-style API and host the
+# same models, so only the address, the key and the limits change. Set LLM_PROVIDER in .env:
+#   groq        Groq (GROQ_API_KEY). Free plan: 8K tokens a minute, 200K a day for gpt-oss-120b
+#   openrouter  OpenRouter (OPENROUTER_API_KEY), pay-as-you-go from credits; every call is
+#               pinned to OPENROUTER_PROVIDERS, in that order, and never sent anywhere else
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").strip().lower()
+PROVIDERS = {
+    "groq": {"name": "Groq", "base_url": "https://api.groq.com/openai/v1", "key_env": "GROQ_API_KEY",
+             "tokens_per_day": 200_000},
+    "openrouter": {"name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "key_env": "OPENROUTER_API_KEY",
+                   "tokens_per_day": None},  # no daily cap: spending is capped by credits and the key's limit
+}
+if LLM_PROVIDER not in PROVIDERS:
+    raise ValueError(f"LLM_PROVIDER must be one of {', '.join(PROVIDERS)} (got '{LLM_PROVIDER}')")
+LLM_BASE_URL = PROVIDERS[LLM_PROVIDER]["base_url"]
+LLM_API_KEY = os.getenv(PROVIDERS[LLM_PROVIDER]["key_env"], "")
+if LLM_PROVIDER == "openrouter" and not LLM_API_KEY:
+    LLM_API_KEY = os.getenv("OPEN_ROUTER_API_KEY", "")  # also accepted, spelled with an underscore
+LLM_KEY_ENV = PROVIDERS[LLM_PROVIDER]["key_env"]  # named in "key not set" messages
 
-# Groq models (see what your key can use: https://console.groq.com/docs/models)
-GROQ_MODEL_RAG = "openai/gpt-oss-20b"
-GROQ_MODEL_SQL = "openai/gpt-oss-120b"
-GROQ_MODEL_SUMMARY = "openai/gpt-oss-120b"  # offline table summaries (Text-to-SQL Version-3)
+# OpenRouter hosts to use, first choice first (slugs from openrouter.ai/openai/gpt-oss-120b):
+# Crusoe (full precision, ~250 tokens/s, 99.9% up), then Groq. Pinned so a whole evaluation
+# runs on the same setup; no other host is ever used.
+# Not CoreWeave: its gpt-oss puts the model's thinking inside the JSON answer ({"analysis": ...})
+# instead of returning it separately, so Scout finds no meanings (tested 2026-11-03).
+OPENROUTER_PROVIDERS = ["crusoe", "groq"]
+
+# models: the same names on Groq and OpenRouter
+LLM_MODEL_RAG = "openai/gpt-oss-20b"
+LLM_MODEL_SQL = "openai/gpt-oss-120b"
+LLM_MODEL_SUMMARY = "openai/gpt-oss-120b"  # offline table summaries (Text-to-SQL Version-3)
 
 # Text-to-SQL Version-4: SQL is generated in rounds of 3 calls and compared; never more than this per question
 SQL_CALLS_PER_ROUND = 3
@@ -33,10 +56,30 @@ QUERY_TIMEOUT_SECONDS = 5        # a query running longer than this is stopped
 MAX_ESTIMATED_READS = 1_000_000  # rows a query may read, estimated from its plan before running
 RESULT_CACHE_SIZE = 10           # most recent results kept for paging (least recently used is dropped)
 ANSWER_CACHE_SIZE = 10           # Version-12: recent answers reused when the same question comes back
+
+# Version-14: evaluation runs started from the Evaluation tab. Rough cost of one question in the
+# app's flow (meaning + steps + 3 SQL tries), measured on the practice database; used only for
+# the estimate shown before a run starts.
+EVAL_TOKENS_PER_QUESTION = 8_000
+EVAL_CALLS_PER_QUESTION = 5.5
+EVAL_SECONDS_PER_QUESTION = 20
+# the provider's daily token limit (Groq free plan: 200K for gpt-oss-120b; OpenRouter: none); the estimate warns past it
+PROVIDER_TOKENS_PER_DAY = PROVIDERS[LLM_PROVIDER]["tokens_per_day"]
+# a rate-limited question waits this long and tries again, at most EVAL_RATE_LIMIT_TRIES times
+EVAL_RATE_LIMIT_WAIT_SECONDS = 60
+EVAL_RATE_LIMIT_TRIES = 3
 QUERY_CONNECTIONS = 4            # queries that can run at the same time (one slow query doesn't block the rest)
+
+# Version-18: BIRD Mini-Dev, unzipped from BIRD's minidev.zip and left exactly as downloaded.
+# Kept outside data/text_to_sql/ on purpose: Scout attaches every .sqlite file in that folder,
+# so BIRD's databases (and their questions) stay out of the app until an evaluation run uses them.
+BIRD_MINI_DEV_DIR = ROOT_DIR / "data/benchmarks/bird/minidev/MINIDEV"
 
 # Text-to-SQL Version-5: the user confirms what the question means first; at most this many sets of options
 MAX_CLARIFY_ROUNDS = 3
+# when the checks find the confirmed meaning asks for a value the data doesn't have, the meaning
+# is asked again with the real values: at most this many meanings in all (the first + 1 more)
+MAX_MEANING_TRIES = 2
 # Version-10: tries at the steps (the first + re-runs from the user's comments)
 MAX_STEP_ROUNDS = 5
 
@@ -51,12 +94,15 @@ LLM_TIMEOUT_SECONDS = 30
 LLM_MAX_RETRIES = 3
 
 # Dashboard: $ per million tokens (input, output), to price every LLM call. Reasoning tokens
-# are billed as output. Groq on-demand prices as listed on 2026-11-03 (third-party trackers;
-# Groq's console is the source of truth: update these if they differ).
-LLM_PRICES = {
-    "openai/gpt-oss-120b": (0.15, 0.60),
-    "openai/gpt-oss-20b": (0.075, 0.30),
+# are billed as output. OpenRouter reports each call's exact cost, which is used instead when
+# present; these are the fallback and the basis of estimates.
+#   Groq: on-demand prices as listed on 2026-11-03 (third-party trackers; check Groq's console)
+#   OpenRouter: Crusoe's prices for gpt-oss-120b, its first host (Groq through OpenRouter: 0.15 / 0.60)
+PRICES_BY_PROVIDER = {
+    "groq": {"openai/gpt-oss-120b": (0.15, 0.60), "openai/gpt-oss-20b": (0.075, 0.30)},
+    "openrouter": {"openai/gpt-oss-120b": (0.05, 0.25), "openai/gpt-oss-20b": (0.03, 0.14)},
 }
+LLM_PRICES = PRICES_BY_PROVIDER[LLM_PROVIDER]
 
 # Privacy: Groq sees the question and the schema. When False, Scout never sends data rows:
 # no sample rows when writing table descriptions, no result rows in the disagreement feedback.

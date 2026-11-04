@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from backend.llm import chat, make_client
 
-from backend.config import GROQ_API_KEY, GROQ_MODEL_SQL
+from backend.config import LLM_API_KEY, LLM_MODEL_SQL
 
 MAX_OPTIONS = 3
 
@@ -27,6 +27,9 @@ SYSTEM_PROMPT = (
     "The FIRST meaning is always the plain, literal reading of the question. No meaning may add "
     "columns, details or filters the question doesn't ask for (if only names are asked for, don't "
     "add their city); meanings differ only in how they read what IS asked.\n"
+    "When the question names a value (a city, a status, a category), use how the data stores it, from "
+    "the column descriptions and listed values: if California is stored as 'CA' and 'Calif.', the "
+    "meaning counts both. Never pin a meaning to a spelling the data doesn't have.\n"
     "Write for someone who doesn't know SQL or this database: plain everyday words only. Never use "
     "table or column names (no order_date, employee_id, order_items, unit_price_cents); say 'the order "
     "date', 'the employee', 'the price' instead. If a column has no clear everyday meaning, describe "
@@ -44,8 +47,8 @@ class QuestionInterpreter:
     """Turns a question into up to 3 plain-language meanings for the user to pick from."""
 
     def __init__(self):
-        self.api_key = GROQ_API_KEY
-        self.model_name = GROQ_MODEL_SQL
+        self.api_key = LLM_API_KEY
+        self.model_name = LLM_MODEL_SQL
         self.client = None
 
     def options(
@@ -59,7 +62,7 @@ class QuestionInterpreter:
         One LLM call. Returns [{"meaning": str, "choices": [str]}].
         """
         if not self.api_key:
-            raise RuntimeError("GROQ_API_KEY is not set.")
+            raise RuntimeError("The LLM API key is not set (LLM_PROVIDER and its key in .env).")
 
         # created on first use, so the server can start without a key
         if self.client is None:
