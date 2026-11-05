@@ -374,10 +374,13 @@ function IssueDetail({ id, ready, onChange }) {
   const canInvestigate = ["new", "failed", "rejected"].includes(issue.status);
   const fix = issue.report && FIX[issue.report.fix_type];
   // Version-18: a fix that changes Scout is never applied from a BIRD question (it would teach Scout the test)
-  const benchmarkLocked = issue.details?.suite === "bird_minidev" && ["error_book", "table_description"].includes(issue.report?.fix_type);
+  const benchmarkLocked = issue.details?.suite?.startsWith("bird") && ["error_book", "table_description"].includes(issue.report?.fix_type);
   return (
     <div className="issue-detail">
       <FailureSection issue={issue} />
+      {issue.details?.eval_id != null && (
+        <RecheckSection questionId={issue.details.eval_id} suite={issue.details.suite || "practice"} />
+      )}
 
       <section className="issue-section">
         <div className="issue-section-head">
@@ -458,6 +461,143 @@ function IssueDetail({ id, ready, onChange }) {
 
       {error && <ErrorAlert message={error} />}
     </div>
+  );
+}
+
+// Version-21: run this eval question again with Scout as it is now, to see if a fix worked.
+// A check never changes the Evaluation tab's scores and never logs a new issue. Used in each
+// eval issue and under each question of the Accuracy check.
+const CHECK_OUTCOME = {
+  right: "Right",
+  "wrong rows": "Wrong rows",
+  "SQL error": "SQL error",
+  "failed checks": "Failed checks",
+  "value not in data": "Value not in data",
+  "no answer": "No answer",
+};
+const CHECK_STAGE = { meaning: "Reading the question", steps: "Planning the steps", sql: "Writing and checking the SQL", waiting: "Waiting for the rate limit" };
+
+function rowsText(rows) {
+  if (!rows?.length) return "(no rows)";
+  return rows.map((r) => r.map((v) => (v === null ? "NULL" : String(v))).join(" | ")).join("\n");
+}
+
+// Also used in Evaluation -> Accuracy check, under each question (Version-21).
+export function RecheckSection({ questionId, suite }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [starting, setStarting] = useState(false);
+
+  async function load() {
+    try {
+      setData(await getJson("/api/eval/checks", { question_id: questionId }));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, [questionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const running = data?.running;
+  useEffect(() => {
+    if (!running) return undefined;
+    const timer = setInterval(load, POLL_MS);
+    return () => clearInterval(timer);
+  }, [running?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function start() {
+    setStarting(true);
+    setError("");
+    try {
+      await postForm("/api/eval/checks", { suite, question_id: questionId });
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  const latest = !running && data?.checks?.[0];
+  const result = latest?.result;
+  const older = (data?.checks || []).slice(running ? 0 : 1);
+  return (
+    <section className="issue-section">
+      <div className="issue-section-head">
+        <h4>
+          <Icon name="refresh" size={15} />
+          Run this question again
+        </h4>
+        {result && (
+          <span className="muted">
+            {result.llm_calls ?? 0} LLM call{result.llm_calls === 1 ? "" : "s"} · {formatCost(result.cost)} · {result.seconds}s
+          </span>
+        )}
+      </div>
+      <p className="muted small">
+        Asks Scout question #{questionId} again, as it is now, in the same way as an evaluation run (first meaning, steps as
+        written, BIRD's hint). The answer is only shown here: it doesn't change the score or add an issue.
+      </p>
+
+      {running && (
+        <p className="muted agent-waiting">
+          <span className="spinner" /> {CHECK_STAGE[running.current?.stage] || "Starting"}…
+        </p>
+      )}
+
+      {latest && (
+        <div className="recheck-result">
+          <p>
+            <span className={`badge ${result?.correct ? "high" : "low"}`}>
+              {result ? CHECK_OUTCOME[result.outcome] || result.outcome : latest.status === "failed" ? "Failed" : "Stopped"}
+            </span>{" "}
+            <span className="muted small">checked {formatTime(latest.run_at)} · {latest.model}</span>
+          </p>
+          {result?.doubtful && <p className="muted small">Marked "BIRD answer doubtful": {result.doubtful}</p>}
+          {latest.message && <p className="problems">{latest.message}</p>}
+          {result?.sql && (
+            <>
+              <div className="label">Scout's SQL now</div>
+              <pre className="code dash-issue-sql">{result.sql}</pre>
+            </>
+          )}
+          {result?.error && <p className="problems">{result.error}</p>}
+          {result && !result.correct && !result.error && (
+            <div className="recheck-rows">
+              <div>
+                <div className="label">Scout's rows (first 10)</div>
+                <pre className="code dash-issue-sql">{rowsText(result.rows)}</pre>
+              </div>
+              <div>
+                <div className="label">Correct rows (first 10)</div>
+                <pre className="code dash-issue-sql">{rowsText(result.expected_rows)}</pre>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {older.length > 0 && (
+        <p className="muted small">
+          Earlier checks:{" "}
+          {older.map((c, i) => (
+            <span key={c.id}>
+              {i > 0 && " · "}
+              {formatTime(c.run_at)} {c.result ? CHECK_OUTCOME[c.result.outcome] || c.result.outcome : c.status}
+            </span>
+          ))}
+        </p>
+      )}
+
+      {data?.busy && !running && <p className="muted small">An evaluation run is going: run this when it finishes.</p>}
+      <button type="button" className="btn btn-secondary btn-sm" onClick={start} disabled={starting || !!running || data?.busy}>
+        <Icon name="refresh" size={14} />
+        {latest ? "Run again" : "Run this question"}
+      </button>
+      {error && <ErrorAlert message={error} />}
+    </section>
   );
 }
 

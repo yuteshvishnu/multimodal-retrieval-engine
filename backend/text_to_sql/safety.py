@@ -80,7 +80,7 @@ def write_problems(sql: str) -> List[str]:
     """
     try:
         statements = [s for s in sqlglot.parse(sql, read="sqlite") if s is not None]
-    except sqlglot.errors.ParseError:
+    except sqlglot.errors.SqlglotError:  # ParseError, and TokenError (an unclosed quote)
         # can't read it: reject if a write keyword appears outside quoted strings
         code = re.sub(r"'(?:[^']|'')*'|\"[^\"]*\"|--[^\n]*|/\*.*?\*/", " ", sql, flags=re.DOTALL)
         found = {m.group(1).split()[0].upper() for m in WRITE_KEYWORDS.finditer(code)}

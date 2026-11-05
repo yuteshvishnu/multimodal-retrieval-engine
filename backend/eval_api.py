@@ -3,7 +3,7 @@ Evaluation (Version-13): how accurate Scout is on a benchmark, for the Evaluatio
 ring next to Rexie's name.
 
     GET /api/eval/summary   the latest run: accuracy, by difficulty, by outcome, LLM calls and cost
-    GET /api/eval/results   its questions, 10 per page; filter right / wrong, by difficulty, search
+    GET /api/eval/results   its questions, 10 per page; filter right / wrong (scout / doubtful), by difficulty, search
 
 Running one from the tab (Version-14, backend/eval_runner.py):
 
@@ -14,6 +14,8 @@ Running one from the tab (Version-14, backend/eval_runner.py):
                                        Evaluation -> Issues picks a run, and the agent works on its issues)
     POST /api/eval/runs/{id}/stop      stop after the current question
     POST /api/eval/runs/{id}/resume    carry on from where it stopped
+    POST /api/eval/checks              Version-21: run one question again (suite, question_id), from its issue
+    GET  /api/eval/checks              that question's checks, newest first, and the one running now
 
 A run is one JSON file: {"benchmark", "run_at", "model", "mode", "results": [one per question]}.
 The newest file in data/text_to_sql/eval/runs/ is shown; until a real run exists, a sample run
@@ -39,6 +41,8 @@ router = APIRouter(prefix="/api/eval", tags=["Evaluation"])
 EVAL_DIR = Path("data/text_to_sql/eval")
 RUNS_DIR = EVAL_DIR / "runs"
 SAMPLE_RUN = EVAL_DIR / "sample_bird_run.json"
+# Version-19: BIRD answers we checked by hand and believe are wrong (labels only, never the score)
+DOUBTFUL_FILE = EVAL_DIR / "bird_doubtful.json"
 PAGE_SIZE = 10
 DIFFICULTIES = ("simple", "moderate", "challenging")
 
@@ -54,6 +58,27 @@ def latest_run() -> Dict:
     return json.loads(SAMPLE_RUN.read_text(encoding="utf-8"))
 
 
+def doubtful_answers() -> Dict[str, Dict]:
+    """BIRD question_id -> {"reason", "checked"}; read each time, so an edit shows at once."""
+    if not DOUBTFUL_FILE.exists():
+        return {}
+    return json.loads(DOUBTFUL_FILE.read_text(encoding="utf-8")).get("questions", {})
+
+
+def label_doubtful(run: Dict) -> List[Dict]:
+    """The run's results; a wrong BIRD answer we believe BIRD got wrong carries "doubtful": reason.
+    It still counts as wrong: only the label is added."""
+    results = run.get("results", [])
+    if run.get("suite") != "bird_minidev":
+        return results
+    doubtful = doubtful_answers()
+    return [
+        {**r, "doubtful": doubtful[str(r.get("id"))]["reason"]}
+        if not r.get("correct") and str(r.get("id")) in doubtful else r
+        for r in results
+    ]
+
+
 def score(results: List[Dict]) -> Dict:
     right = sum(1 for r in results if r.get("correct"))
     return {"total": len(results), "correct": right,
@@ -61,18 +86,19 @@ def score(results: List[Dict]) -> Dict:
 
 
 def summarize(run: Dict) -> Dict:
-    results = run.get("results", [])
+    results = label_doubtful(run)
     outcomes: Dict[str, int] = {}
     for r in results:
         outcomes[r.get("outcome", "wrong rows")] = outcomes.get(r.get("outcome", "wrong rows"), 0) + 1
     calls = sum(r.get("llm_calls", 0) for r in results)
     return {
-        **{k: run.get(k) for k in ("benchmark", "note", "run_at", "model", "provider", "mode", "status")},
+        **{k: run.get(k) for k in ("suite", "benchmark", "note", "run_at", "model", "provider", "mode", "status")},
         "short": run.get("short") or "BIRD",
         "sample": bool(run.get("sample")),
         **score(results),
         "by_difficulty": {d: score([r for r in results if r.get("difficulty") == d]) for d in DIFFICULTIES},
         "by_outcome": outcomes,
+        "doubtful": sum(1 for r in results if r.get("doubtful")),  # wrong, but BIRD's answer looks wrong
         "databases": len({r.get("db_id") for r in results}),
         "llm_calls": calls,
         "avg_llm_calls": round(calls / len(results), 1) if results else 0,
@@ -88,9 +114,13 @@ def summary_endpoint():
 @router.get("/results")
 def results_endpoint(page: int = 1, filter: str = "all", difficulty: str = "", search: str = ""):
     latest = latest_run()
-    results = latest.get("results", [])
+    results = label_doubtful(latest)
     if filter in ("right", "wrong"):
         results = [r for r in results if bool(r.get("correct")) == (filter == "right")]
+    elif filter == "scout":  # wrong, and not a doubtful BIRD answer: what's worth fixing
+        results = [r for r in results if not r.get("correct") and not r.get("doubtful")]
+    elif filter == "doubtful":
+        results = [r for r in results if r.get("doubtful")]
     if difficulty in DIFFICULTIES:
         results = [r for r in results if r.get("difficulty") == difficulty]
     if search.strip():
@@ -171,3 +201,34 @@ def resume_endpoint(run_id: str):
         raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+# ---------- Version-21: run one question again, from its issue ----------
+
+def _check_view(run: Dict) -> Dict:
+    result = (label_doubtful(run) or [None])[0]
+    return {k: run.get(k) for k in ("id", "status", "message", "run_at", "finished_at", "model", "current")} | {"result": result}
+
+
+@router.post("/checks")
+def start_check_endpoint(suite: str = Form(...), question_id: str = Form(...)):
+    try:
+        run = _runner().check(suite, question_id)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"id": run["id"], "status": run["status"]}
+
+
+@router.get("/checks")
+def checks_endpoint(question_id: str):
+    r = _runner()
+    live = r.progress() if r.busy() else None
+    running = live if live and live.get("check") and str(live.get("question_id")) == str(question_id) else None
+    return {
+        "running": {k: running.get(k) for k in ("id", "status", "current", "run_at")} if running else None,
+        "busy": r.busy() and running is None,  # another run or check is using the runner
+        "checks": [_check_view(run) for run in r.checks(question_id)[:5]],
+    }
+

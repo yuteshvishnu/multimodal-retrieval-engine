@@ -69,3 +69,26 @@ def test_eval_issues_and_user_issues_are_shown_apart(client, store):
     assert [i["question"] for i in evaluation["items"]] == ["eval question"]
     assert store.new_issue_ids(5, ["eval"]) == [evaluation["items"][0]["id"]]
     assert client.get("/api/issues").json()["total"] == 3  # no scope: everything, as before
+
+
+def test_a_doubtful_bird_answer_is_labelled_but_still_counts_as_wrong(tmp_path, monkeypatch):
+    """Version-19: our hand-checked list labels a BIRD answer as doubtful; the score never changes."""
+    import json
+
+    import backend.eval_api as eval_api
+
+    doubtful = tmp_path / "bird_doubtful.json"
+    doubtful.write_text(json.dumps({"questions": {"1481": {"reason": "uses the whole table's minimum"}}}))
+    monkeypatch.setattr(eval_api, "DOUBTFUL_FILE", doubtful)
+    run = {"suite": "bird_minidev", "results": [
+        {"id": 1471, "question": "a", "correct": True},
+        {"id": 1481, "question": "b", "correct": False},
+        {"id": 1484, "question": "c", "correct": False},
+    ]}
+    summary = eval_api.summarize(run)
+    assert (summary["correct"], summary["accuracy"], summary["doubtful"]) == (1, 33.3, 1)  # still wrong
+    labelled = {r["id"]: r.get("doubtful") for r in eval_api.label_doubtful(run)}
+    assert labelled == {1471: None, 1481: "uses the whole table's minimum", 1484: None}
+
+    # the practice set is never labelled, even with the same id
+    assert not eval_api.summarize({**run, "suite": "practice"})["doubtful"]

@@ -604,6 +604,22 @@ textarea:focus {
 }
 
 /* ---------- clarify: pick what the question means ---------- */
+
+/* a meaning that sounds like a change to the data: a warning, never a block */
+.option-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--warning);
+}
+
+.option-warning svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
 .options {
   display: flex;
   flex-direction: column;
@@ -3244,4 +3260,71 @@ section > .pagination {
 .eval-run-meta {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+/* Version-20: the Tables view lists each column with what the catalog knows about it */
+.column-catalog {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+}
+
+.column-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) 96px 1fr;
+  gap: 4px 12px;
+  align-items: baseline;
+  padding: 7px 12px;
+  font-size: 13px;
+  border-top: 1px solid var(--border);
+}
+
+.column-row:first-child {
+  border-top: none;
+}
+
+.column-name {
+  font-family: var(--mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
+}
+
+.column-kind {
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+.column-note {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .column-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .column-note {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Version-21: run one eval question again, from its issue */
+.recheck-result {
+  margin: 8px 0 10px;
+}
+.recheck-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.eval-recheck {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.eval-recheck .issue-section {
+  padding: 0;
+  border: 0;
+  background: none;
 }

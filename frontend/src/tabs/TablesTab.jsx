@@ -2,6 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { deleteJson, getJson, postForm } from "../api.js";
 import { DataTable, ErrorAlert, Icon, Loading, Pagination } from "../components/ui.jsx";
 
+// Version-20: each column's kind in the schema catalog, which decides what Scout is told about it
+const KIND_LABEL = {
+  key: "id / link",
+  category: "few values",
+  text: "many values",
+  long_text: "free text",
+  number: "number",
+  date: "date",
+  empty: "empty",
+};
+
 // a description is either confirmed by the user or not
 const STATUS = {
   reviewed: { label: "Reviewed", className: "high" },
@@ -212,13 +223,17 @@ function TableItem({ table, onSaved, onDatabaseRemoved }) {
         <div className="table-item-body">
           <Review table={table} onSaved={onSaved} />
 
-          <div className="label">Columns</div>
-          <div className="option-choices column-list">
+          <div className="label">Columns · what Scout knows about each</div>
+          <div className="column-catalog">
             {table.columns.map((c) => (
-              <span key={c.name} className="tag">
-                {c.name}
-                {c.type && <span className="muted"> {c.type.toLowerCase()}</span>}
-              </span>
+              <div key={c.name} className="column-row">
+                <span className="column-name">
+                  {c.name}
+                  {c.type && <span className="muted"> {c.type.toLowerCase()}</span>}
+                </span>
+                {c.kind && <span className={`column-kind ${c.kind}`}>{KIND_LABEL[c.kind] || c.kind}</span>}
+                <span className="muted small column-note">{c.note}</span>
+              </div>
             ))}
           </div>
 

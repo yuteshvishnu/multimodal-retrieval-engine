@@ -25,7 +25,18 @@ SYSTEM_PROMPT = (
     # answer format (BIRD's convention): an evaluation compares the result's columns exactly
     "The last step shows only what the question asks for, as it's stored: no ids, extra counts or "
     "other extras, first and last names kept as two separate values, and numbers not rounded, unless "
-    "the question asks for them. Never write 'optionally': decide.\n"
+    "the question asks for them. Leaving ids out applies only to what's shown: still group by each "
+    "record (each customer, each product), never by its name, since different records can share a "
+    "name. When the question asks who, which or what, show only that: not the value used to rank or "
+    "filter it (a total, a count, an average), unless the question asks for that too. "
+    "When the question asks yes/no and then asks for a value (Is it true…? If so, how many / how "
+    "much / by what percent?), show only that value: it answers the yes/no by itself. Work it out "
+    "in the direction the question states (the first thing minus the second, or as the hint's "
+    "formula says) and keep it as computed, even if negative or 0: never replace it with 0, "
+    "true/false or a message. "
+    "Never write 'optionally': decide. When the question or its hint "
+    "defines how a value is formed (e.g. 'the month is the 5th and 6th characters of the date'), "
+    "show that value in exactly that form.\n"
     "Never plan to change, add or delete data: only read it.\n"
     'Return only JSON: {"steps": ["step 1 text", "step 2 text", ...]}'
 )

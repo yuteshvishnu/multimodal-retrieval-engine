@@ -17,6 +17,17 @@ SYSTEM_PROMPT = (
     "Return only the columns the question asks for, exactly as stored: no ids, extra counts or other "
     "extra columns, no joined text (keep first_name and last_name as separate columns), and no ROUND "
     "or other formatting, unless the question asks for it. "
+    "When the question asks who, which or what, return only that, not the value used to rank or "
+    "filter it (a total, a count), unless the question asks for it too. "
+    "When the question asks yes/no and then asks for a value (Is it true…? If so, how many / how "
+    "much / by what percent?), return only that value: it answers the yes/no by itself. Compute it "
+    "in the direction the question states (the first thing minus the second, or as the hint's "
+    "formula says) and keep it as computed, even if negative or 0: never replace it with 0, "
+    "true/false or a message (no CASE WHEN … THEN 'true'). "
+    "Leaving ids out applies only to what's shown: still group and join by the id (different records "
+    "can share a name, e.g. two customers called Ana Kim), even when only names are shown. "
+    "But when the question or its hint defines how a value is formed (e.g. 'the month is the 5th and "
+    "6th characters of Date'), return that value in exactly that form, not the stored column. "
     "Return only the SQL query, with no explanation."
 )
 

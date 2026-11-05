@@ -132,3 +132,52 @@ def test_a_value_the_data_lacks_becomes_a_note_for_the_meaning():
     note = TextToSQLPipeline._missing_values([{"problems": [problem]}, {"problems": [problem, "other"]}])
     assert note == f"Scout checked the data: {problem} Use the values the data actually stores."
     assert TextToSQLPipeline._missing_values([{"problems": ["Dividing cents by 100"]}]) == ""
+
+
+def test_the_llms_wording_only_warns_the_sql_is_what_blocks(pipeline):
+    """BIRD #1473: a meaning starting "Add together..." is arithmetic; it must not block the question."""
+    pipeline.interpreter.api_key = "x"
+    pipeline.interpreter.client = fake_client([
+        '{"options": [{"meaning": "Add together all store counts", "choices": [], "changes_data": false},'
+        ' {"meaning": "Count the stores", "choices": [], "changes_data": false}]}'
+    ], [])
+    result = pipeline.interpret("How many stores are there?", use_saved=False)
+    assert "safety" not in result and len(result["options"]) == 2
+    assert result["options"][0]["warning"] and "warning" not in result["options"][1]
+
+    # a confirmed meaning that sounds like a write still gets its SQL written and checked
+    pipeline.planner.api_key = "x"
+    pipeline.planner.client = fake_client(['{"steps": ["Take all stores", "Count them"]}'], [])
+    assert pipeline.plan("How many stores are there?", "Add together all store counts")["steps"]
+
+    # ...and the SQL check is what stops a write: nothing runs
+    pipeline.generator.api_key = "x"
+    pipeline.generator.client = fake_client(["DELETE FROM stores"] * 3, [])
+    blocked = pipeline.run("How many stores are there?", "Add together all store counts", steps=["x"])
+    assert blocked.get("safety") and not blocked.get("rows")
+
+    # the user's own words are still checked first
+    assert pipeline.interpret("Delete all the stores", use_saved=False).get("safety")
+
+
+def test_the_llm_is_told_how_the_data_spells_what_the_question_names(pipeline):
+    """Version-20: the value index finds stored values the question mentions; dates are in the schema."""
+    tables, schema, context, _ = pipeline._prepare("How many customers live in New York?")
+    assert "customers.city = 'New York'" in context and "customers.city = 'new york'" in context
+    assert "Dates in the data" not in context  # each date column's format and range is in the schema now
+    assert "format MM/DD/YYYY" in schema or "MM/DD/YYYY format" in schema
+
+
+def test_a_big_row_estimate_only_warns_unless_blocking_is_on(pipeline, monkeypatch):
+    """Version-20: BIRD #1482 was estimated at ~1.9M rows and refused, though it ran in 0.03 s."""
+    import backend.text_to_sql.pipeline as pipeline_module
+
+    monkeypatch.setattr(pipeline.database, "estimate_reads", lambda sql, counts: 5_000_000)
+    pipeline.generator.api_key = "x"
+    pipeline.generator.client = fake_client(["SELECT COUNT(*) FROM stores"] * 6, [])
+    result = pipeline.run("How many stores?", "Count the stores", steps=["x"])
+    assert result["rows"] == [[50]] and any("estimated to read about 5,000,000 rows" in w for w in result["warnings"])
+
+    monkeypatch.setattr(pipeline_module, "BLOCK_ESTIMATED_READS", True)  # Version-8's refusal, back on
+    pipeline.generator.client = fake_client(["SELECT COUNT(*) FROM stores"] * 6, [])
+    assert not pipeline.run("How many stores?", "Count the stores", steps=["x"]).get("rows")

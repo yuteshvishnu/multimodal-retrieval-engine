@@ -2,7 +2,7 @@
 Text-to-SQL Version-4: deterministic checks around the LLM's SQL. No LLM calls, no guessing:
 each check is a plain rule over the question, the SQL, or the result.
 
-    profile_table   once at startup: what each column really contains
+    (what each column contains is profiled once per database by schema_catalog.py, Version-20)
     question_problems   before any LLM call: impossible requests ("top -5")
     check_sql           before running: errors (reject the SQL) and warnings
     check_result        after running: warnings about a suspicious result
@@ -11,7 +11,6 @@ each check is a plain rule over the question, the SQL, or the result.
 """
 import hashlib
 import re
-import sqlite3
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -21,12 +20,8 @@ from sqlglot import exp
 from backend.config import SHARE_ROWS_WITH_LLM
 
 # check_sql's problem when the SQL compares a column with a value it never has ("city has no value 'X'")
-MISSING_VALUE = re.compile(r"^\w+ has no value ")
+MISSING_VALUE = re.compile(r"^[\w.]+ has no value ")
 
-# columns with at most this many distinct values are treated as categories
-MAX_CATEGORY_VALUES = 20
-# distinct values read per text column when looking for dates (keeps startup fast on big tables)
-MAX_VALUES_SCANNED = 1000
 
 DATE_FORMATS = {
     "YYYY-MM-DD": (re.compile(r"^\d{4}-\d{2}-\d{2}$"), "%Y-%m-%d"),
@@ -40,52 +35,7 @@ RANKING_NOTE = "ROW_NUMBER keeps exactly one row per group and drops ties; RANK 
 MONEY_WORDS = ("amount", "price", "revenue", "total", "spent", "sales", "cost", "salary")
 
 
-# ---------- profiling (once, at startup) ----------
-
-def profile_table(conn: sqlite3.Connection, alias: str, table: str) -> Tuple[int, Dict[str, dict]]:
-    """
-    Returns (row_count, {column: profile}). A profile can have:
-        values       the full set of values, for category columns (<= 20 distinct)
-        min, max     for number columns
-        date_format  "YYYY-MM-DD" or "MM/DD/YYYY", if every value is a date in that format
-        date_min, date_max   earliest and latest date (as date objects)
-    """
-    source = f'"{alias}"."{table}"'
-    row_count = conn.execute(f"SELECT COUNT(*) FROM {source}").fetchone()[0]
-
-    profiles = {}
-    for _, column, col_type, _, _, _ in conn.execute(f'PRAGMA "{alias}".table_info("{table}")'):
-        col = f'"{column}"'
-        profile = {}
-        col_type = (col_type or "").upper()
-
-        if any(t in col_type for t in ("INT", "REAL", "NUM", "DEC", "FLOA", "DOUB")):
-            low, high = conn.execute(f"SELECT MIN({col}), MAX({col}) FROM {source}").fetchone()
-            if low is not None:
-                profile.update(min=low, max=high)
-        else:
-            values = [r[0] for r in conn.execute(
-                f"SELECT DISTINCT {col} FROM {source} WHERE {col} IS NOT NULL LIMIT {MAX_VALUES_SCANNED}"
-            )]
-            date_format = _date_format(values)
-            if date_format:
-                parsed = [_parse_date(v, date_format) for v in values]
-                profile.update(date_format=date_format, date_min=min(parsed), date_max=max(parsed))
-            elif 0 < len(values) <= MAX_CATEGORY_VALUES and all(isinstance(v, str) for v in values):
-                profile["values"] = set(values)
-
-        profiles[column] = profile
-    return row_count, profiles
-
-
-def _date_format(values: list) -> Optional[str]:
-    if not values or not all(isinstance(v, str) for v in values):
-        return None
-    for name, (pattern, _) in DATE_FORMATS.items():
-        if all(pattern.match(v) for v in values):
-            return name
-    return None
-
+# ---------- dates (profiled by schema_catalog.py) ----------
 
 def _parse_date(text: str, date_format: str) -> date:
     return datetime.strptime(text, DATE_FORMATS[date_format][1]).date()
@@ -117,13 +67,17 @@ def question_problems(question: str) -> List[str]:
 
 # ---------- before running: the SQL ----------
 
-def check_sql(sql: str, tables: List[dict], today: date) -> Tuple[List[str], List[str]]:
+def check_sql(sql: str, tables: List[dict], today: date, values=None) -> Tuple[List[str], List[str]]:
     """
     Returns (errors, warnings).
+    values: the value index (Version-20), to check text columns with too many values to list.
     Errors mean the SQL is wrong for sure: it is rejected and never run.
     Warnings mean it may be fine but deserves attention.
     """
     errors, warnings = [], []
+    # Version-20: only the tables the SQL reads (a column name like Segment can exist in two tables)
+    used = tables_in_sql(sql, [t["name"] for t in tables])
+    tables = [t for t in tables if t["name"] in used] or tables
     profiles = _profiles_by_column(tables)
 
     limit = re.search(r"\bLIMIT\s+(-?\d+)", sql, re.IGNORECASE)
@@ -139,18 +93,18 @@ def check_sql(sql: str, tables: List[dict], today: date) -> Tuple[List[str], Lis
     comparisons += [(m.group(1), "IN", re.findall(r"'([^']*)'", m.group(2))) for m in re.finditer(
         r"\b(\w+)\s+(?:NOT\s+)?IN\s*\(([^)]*)\)", sql, re.IGNORECASE)]
 
-    for column, op, values in comparisons:
+    for column, op, literals in comparisons:
         for p in profiles.get(column.lower(), []):
             if "values" in p and op in ("=", "!=", "<>", "IN"):
-                unknown = [v for v in values if v not in p["values"]]
-                if unknown and not any(set(values) <= q.get("values", set()) for q in profiles[column.lower()]):
+                unknown = [v for v in literals if v not in p["values"]]
+                if unknown and not any(set(literals) <= q.get("values", set()) for q in profiles[column.lower()]):
                     errors.append(
                         f"{column} has no value {', '.join(repr(v) for v in unknown)}; "
                         f"its values are {', '.join(repr(v) for v in sorted(p['values']))}."
                     )
                     break
             if "date_format" in p:
-                for value in values:
+                for value in literals:
                     if not DATE_FORMATS[p["date_format"]][0].match(value):
                         other = next((n for n, (pat, _) in DATE_FORMATS.items() if pat.match(value)), None)
                         if other:
@@ -161,6 +115,10 @@ def check_sql(sql: str, tables: List[dict], today: date) -> Tuple[List[str], Lis
                     else:
                         if _parse_date(value, p["date_format"]) > today:
                             warnings.append(f"The query uses a future date ('{value}').")
+        if values is not None and op in ("=", "IN") and not any("values" in p for p in profiles.get(column.lower(), [])):
+            problem = _missing_in_index(column, literals, tables, values)
+            if problem:
+                errors.append(problem)
 
     # column <op> number, where no row can match
     for m in re.finditer(r"\b(\w+)\s*(=|<=|>=|<|>)\s*(-?\d+(?:\.\d+)?)(?![\w.'])", sql):
@@ -234,7 +192,7 @@ def tables_in_sql(sql: str, known: List[str]) -> List[str]:
     """
     try:
         tree = sqlglot.parse_one(sql, read="sqlite")
-    except sqlglot.errors.ParseError:
+    except sqlglot.errors.SqlglotError:  # ParseError, and TokenError (an unclosed quote)
         return []
     steps = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
     exact = {name.lower(): name for name in known}
@@ -283,7 +241,7 @@ def explain_disagreement(attempts: List[dict], tables: List[dict]) -> str:
     real_columns = {column.lower() for table in tables for column in table["profile"]}
     try:
         parts = [_sql_parts(a["sql"], real_columns) for a in ok]
-    except sqlglot.errors.ParseError:
+    except sqlglot.errors.SqlglotError:  # ParseError, and TokenError (an unclosed quote)
         return ""
 
     lines, columns = [], set()
@@ -360,6 +318,23 @@ def _sql_parts(sql: str, real_columns: set) -> dict:
     }
 
 
+def _missing_in_index(column: str, literals: List[str], tables: List[dict], values) -> Optional[str]:
+    """
+    Version-20: for a text column with too many values to list, look each compared value up in
+    the value index. A problem only when the column is indexed and none of its tables has it.
+    """
+    owners = [(t["name"], c["name"]) for t in tables for c in t["columns"]
+              if c["name"].lower() == column.lower() and values.indexed(t["name"], c["name"])]
+    if not owners:
+        return None
+    missing = [v for v in literals if not any(values.has(t, c, v) for t, c in owners)]
+    if not missing:
+        return None
+    similar = list(dict.fromkeys(s for v in missing for t, c in owners for s in values.similar(t, c, v)))[:6]
+    hint = f"similar values: {', '.join(repr(v) for v in similar)}" if similar else "no similar value was found"
+    return f"{column} has no value {', '.join(repr(v) for v in missing)}; {hint}."
+
+
 def _column_notes(names: set, tables: List[dict], used: set) -> List[str]:
     """The description comment of each named column, read from the schema shown to the LLM."""
     notes = []
@@ -385,3 +360,89 @@ def _profiles_by_column(tables: List[dict]) -> Dict[str, List[dict]]:
 
 def _unique(items: List[str]) -> List[str]:
     return list(dict.fromkeys(items))
+
+
+# ---------- Version-20: grouping by a name merges different records ----------
+
+# grouped columns "nearly identify" a record when at least this share of rows has its own combination
+NEARLY_UNIQUE = 0.9
+
+def merged_records(sql: str, tables: List[dict], run) -> List[str]:
+    """
+    Errors for GROUP BYs that group a table's rows by columns that *nearly identify* a record
+    (like first_name, last_name: almost every customer has their own) without the table's key,
+    when the data really has different records with the same values (two customers called Ananya
+    Kim): their rows would be added together as one. Grouping by a category (city, status:
+    many records each) is meant to add them up and is never flagged, nor is grouping by a key or
+    a link (orders.customer_id). Read with the parser; run(sql) -> (columns, rows) asks the data.
+    """
+    try:
+        tree = sqlglot.parse_one(sql, read="sqlite")
+    except sqlglot.errors.SqlglotError:  # ParseError, and TokenError (an unclosed quote)
+        return []
+    by_name = {t["name"].lower(): t for t in tables if t.get("catalog")}
+    steps = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
+    aliases = {}  # alias or name -> real table
+    for node in tree.find_all(exp.Table):
+        real = by_name.get(node.name.lower())
+        if real and node.name.lower() not in steps:
+            aliases[node.alias_or_name.lower()] = real
+            aliases[node.name.lower()] = real
+
+    problems = []
+    for group in tree.find_all(exp.Group):
+        grouped = {}  # real table name -> its grouped column names
+        for column in group.find_all(exp.Column):
+            table = _owner(column, aliases)
+            if table:
+                grouped.setdefault(table["name"], set()).add(_real_column(table, column.name))
+        for name, cols in grouped.items():
+            table = by_name[name.lower()]
+            key = table["catalog"]["primary_key"]
+            if len(key) != 1 or key[0] in cols or _linked_key_grouped(table, grouped, by_name):
+                continue
+            names = sorted(c for c in cols if c)
+            kinds = {c["name"]: c["kind"] for c in table["catalog"]["columns"]}
+            if not names or any(kinds.get(c) != "text" for c in names):
+                continue  # only name-like text columns: not keys or links (by records on purpose),
+                # numbers, dates or free text
+            quoted = ", ".join(f'"{c}"' for c in names)
+            source = f'"{table["database"]}"."{table["name"]}"'
+            try:
+                _, (groups,) = run(f"SELECT COUNT(*) FROM (SELECT 1 FROM {source} GROUP BY {quoted})")
+                if groups[0] < NEARLY_UNIQUE * table["catalog"]["row_count"]:
+                    continue  # a category (many records per value): adding them up is the point
+                _, rows = run(f'SELECT {quoted} FROM {source} GROUP BY {quoted} '
+                              f'HAVING COUNT(DISTINCT "{key[0]}") > 1 LIMIT 1')
+            except Exception:
+                continue
+            if rows:
+                example = " ".join(str(v) for v in rows[0])
+                problems.append(
+                    f"Grouping {table['name']} by {', '.join(names)} adds different {table['name']} together "
+                    f"when they share those values (e.g. '{example}' is more than one record). Group by "
+                    f"{table['name']}.{key[0]} too; the result can still show only {', '.join(names)}."
+                )
+    return _unique(problems)
+
+
+def _owner(column, aliases: Dict[str, dict]) -> Optional[dict]:
+    """The real table a GROUP BY column belongs to: by its qualifier, or the one table that has it."""
+    if column.table:
+        return aliases.get(column.table.lower())
+    owners = {t["name"]: t for t in aliases.values()
+              if any(c["name"].lower() == column.name.lower() for c in t["catalog"]["columns"])}
+    return next(iter(owners.values())) if len(owners) == 1 else None
+
+
+def _real_column(table: dict, name: str) -> Optional[str]:
+    return next((c["name"] for c in table["catalog"]["columns"] if c["name"].lower() == name.lower()), None)
+
+
+def _linked_key_grouped(table: dict, grouped: Dict[str, set], by_name: Dict[str, dict]) -> bool:
+    """Another grouped column links to this table's key (GROUP BY o.customer_id, c.first_name)."""
+    for other, cols in grouped.items():
+        for link in by_name[other.lower()]["catalog"]["links"]:
+            if link["table"].lower() == table["name"].lower() and link["column"] in cols:
+                return True
+    return False

@@ -5,13 +5,13 @@ from datetime import datetime
 from typing import List, Optional
 
 from backend.config import (
-    ANSWER_CACHE_SIZE, MAX_CLARIFY_ROUNDS, MAX_STEP_ROUNDS, MAX_ESTIMATED_READS, MAX_LLM_CALLS_PER_QUESTION, MAX_RESULT_ROWS, PAGE_SIZE,
-    QUERY_TIMEOUT_SECONDS, RESULT_CACHE_SIZE, SQL_CALLS_PER_ROUND, SQL_TEMPERATURE,
+    ANSWER_CACHE_SIZE, BLOCK_ESTIMATED_READS, MAX_CLARIFY_ROUNDS, MAX_STEP_ROUNDS, MAX_ESTIMATED_READS, MAX_LLM_CALLS_PER_QUESTION, MAX_RESULT_ROWS, PAGE_SIZE,
+    QUERY_TIMEOUT_SECONDS, RESULT_CACHE_SIZE, SHARE_ROWS_WITH_LLM, SQL_CALLS_PER_ROUND, SQL_TEMPERATURE,
 )
 from backend.rag.encoders.text_encoder import get_text_encoder
 from backend.text_to_sql.answer_cache import AnswerCache
 from backend.text_to_sql.checks import (
-    MISSING_VALUE, check_result, check_sql, date_ranges, describe_rows, explain_disagreement, question_problems,
+    MISSING_VALUE, check_result, check_sql, describe_rows, merged_records, explain_disagreement, question_problems,
     result_signature, tables_in_sql,
 )
 from backend.text_to_sql.database import QueryTimeout, SQLiteDatabase
@@ -31,6 +31,9 @@ def meaning_text(option: dict) -> str:
 
 # how many tables the embedding search picks (bridge tables are added on top)
 TOP_K_TABLES = 4
+# shown on a meaning that sounds like a change to the data (it never blocks the question)
+WRITE_WARNING = ("This sounds like it could change data. Scout only reads data: if the final query "
+                 "would change anything, it's rejected before it runs.")
 
 
 class TextToSQLPipeline:
@@ -144,14 +147,12 @@ class TextToSQLPipeline:
             others = [o for o in options if not self.answers.repeats(saved["meaning"], meaning_text(o))]
             options = [reuse] + others[: MAX_OPTIONS - 1]
 
-        # safety, after the LLM read the question: any meaning that would change data
+        # the LLM's wording never blocks a question: "Add together the values..." is arithmetic, and
+        # only the final SQL shows what would really run (it's checked by the parser before running).
+        # A meaning that sounds like a change to the data only gets a warning.
         for option in options:
-            reason = "changes data" if option["changes_data"] else write_request(option["meaning"])
-            if reason:
-                return self._blocked(
-                    write_message(reason).replace("This question", f"This question (understood as: “{option['meaning']}”)"),
-                    llm_calls=1,
-                )
+            if option["changes_data"] or write_request(option["meaning"]):
+                option["warning"] = WRITE_WARNING
         return {
             "options": options,
             "round": len(history) + 1,
@@ -172,10 +173,10 @@ class TextToSQLPipeline:
         error = self._question_error(query_text)
         if error:
             return {"error": error, "llm_calls": 0}
-        for text, where in ((query_text, "This question"), (meaning, "The confirmed meaning")):
-            reason = write_request(text) if text else None
-            if reason:
-                return self._blocked(write_message(reason, where), llm_calls=0)
+        # the user's own words are checked; the confirmed meaning (LLM wording) never blocks
+        reason = write_request(query_text)
+        if reason:
+            return self._blocked(write_message(reason), llm_calls=0)
         if len(history) >= MAX_STEP_ROUNDS:
             return {
                 "error": f"The steps still aren't right after {MAX_STEP_ROUNDS} tries. Please rephrase the question.",
@@ -208,11 +209,11 @@ class TextToSQLPipeline:
         if error:
             return {"error": error, "llm_calls": 0}
 
-        # safety: checked again here, since /query can be called without /interpret
-        for text, where in ((query_text, "This question"), (meaning, "The confirmed meaning")):
-            reason = write_request(text) if text else None
-            if reason:
-                return self._blocked(write_message(reason, where), llm_calls=0)
+        # safety: the user's words are checked again here, since /query can be called without
+        # /interpret; the meaning (LLM wording) never blocks: the SQL itself is checked before it runs
+        reason = write_request(query_text)
+        if reason:
+            return self._blocked(write_message(reason), llm_calls=0)
 
         # 1) pick the relevant tables, 2) context: what "now" is, and what dates the data covers
         tables, schema, context, now = self._prepare(query_text, previous)
@@ -474,8 +475,9 @@ class TextToSQLPipeline:
 
     def _prepare(self, query_text: str, previous: Optional[dict] = None):
         """
-        The tables for this question, their schema, and the context: the date, the data's
-        date range, and for a follow-up ("now sort that by city") the earlier question and SQL.
+        The tables for this question, their schema (from the catalog), and the context: the date,
+        the stored values the question mentions (value index), and for a follow-up ("now sort
+        that by city") the earlier question and SQL.
         """
         previous = {k: str((previous or {}).get(k, ""))[:2000] for k in ("question", "meaning", "sql")}
         # a follow-up is about the same data, so the earlier question helps pick the tables
@@ -485,9 +487,14 @@ class TextToSQLPipeline:
 
         now = datetime.now()
         context = f"Current date and time: {now:%Y-%m-%d %H:%M} ({now:%A})."
-        ranges = date_ranges(tables)
-        if ranges:
-            context += "\nDates in the data:\n" + "\n".join(f"- {line}" for line in ranges)
+        # (each date column's format and range is in the schema now: Version-20 catalog)
+        # Version-20: stored values the question mentions, spelled exactly as in the data
+        if SHARE_ROWS_WITH_LLM:
+            matches = self.database.values.match(query_text, [(t["database"], t["name"]) for t in tables])
+            if matches:
+                context += ("\nValues stored in the data that match words in the question (spelled exactly "
+                            "as stored; use them if they're what the question means):\n"
+                            + "\n".join(f"- {m['table']}.{m['column']} = '{m['value']}'" for m in matches))
         if previous["question"]:
             context += (
                 "\nThis question follows up on an earlier one; read it in that light "
@@ -529,7 +536,8 @@ class TextToSQLPipeline:
             attempt.update(status="rejected", problems=[f"Invalid SQL: {e}"], error=str(e))
             return attempt
 
-        errors, warnings = check_sql(sql, tables, now.date())
+        errors, warnings = check_sql(sql, tables, now.date(), self.database.values)
+        errors += merged_records(sql, tables, self.database.run)  # Version-20: grouped by a shared name
         if errors:
             attempt.update(status="rejected", problems=errors)
             return attempt
@@ -539,11 +547,15 @@ class TextToSQLPipeline:
             reads = self.database.estimate_reads(sql, self.row_counts)
         except Exception:
             reads = 0  # no plan: the time limit still applies
+        heavy_warning = []
         if reads > MAX_ESTIMATED_READS:
-            attempt.update(status="too_big", reads=reads, problems=[
-                f"could read about {reads:,} rows (limit {MAX_ESTIMATED_READS:,})"
-            ])
-            return attempt
+            if BLOCK_ESTIMATED_READS:
+                attempt.update(status="too_big", reads=reads, problems=[
+                    f"could read about {reads:,} rows (limit {MAX_ESTIMATED_READS:,})"
+                ])
+                return attempt
+            # Version-20: the estimate only warns; the time limit stops a query that's really too slow
+            heavy_warning = [f"The query was estimated to read about {reads:,} rows; it ran within the time limit."]
 
         try:
             columns, rows, more = self.database.query(sql)
@@ -555,7 +567,8 @@ class TextToSQLPipeline:
             return attempt
 
         attempt.update(
-            status="ok", columns=columns, rows=rows, more=more, warnings=warnings, signature=result_signature(rows)
+            status="ok", columns=columns, rows=rows, more=more, warnings=warnings + heavy_warning,
+            signature=result_signature(rows),
         )
         return attempt
 

@@ -343,6 +343,12 @@ export default function SqlTab() {
                         ))}
                       </div>
                     )}
+                    {option.warning && (
+                      <p className="option-warning">
+                        <Icon name="alert" size={13} />
+                        {option.warning}
+                      </p>
+                    )}
                   </div>
                 </label>
               ))}

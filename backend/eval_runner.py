@@ -35,13 +35,14 @@ from typing import Callable, Dict, List, Optional
 
 from backend import usage
 from backend.config import (
-    BIRD_MINI_DEV_DIR,
+    BIRD_CORRECTED_DIR, BIRD_MINI_DEV_DIR,
     EVAL_CALLS_PER_QUESTION, EVAL_RATE_LIMIT_TRIES, EVAL_RATE_LIMIT_WAIT_SECONDS, EVAL_SECONDS_PER_QUESTION,
     EVAL_TOKENS_PER_QUESTION, LLM_MODEL_SQL, LLM_PRICES, LLM_PROVIDER, MAX_MEANING_TRIES, PROVIDER_TOKENS_PER_DAY,
     PROVIDERS,
 )
 
 RUNS_DIR = Path("data/text_to_sql/eval/runs")
+CHECKS_FOLDER = "checks"  # Version-21: one-question checks, under runs/ but never read as runs
 # BIRD's official prediction format: {"<question_id>": "<sql>\t----- bird -----\t<db_id>"}
 BIRD_SEPARATOR = "\t----- bird -----\t"
 
@@ -58,6 +59,17 @@ SUITES = {
         "databases": BIRD_MINI_DEV_DIR / "dev_databases",            # one folder per db_id
         "about": "500 questions from BIRD's dev set across 11 real databases, with BIRD's evidence hints.",
         "missing": "Not downloaded. Unzip BIRD's minidev.zip so data/benchmarks/bird/minidev/MINIDEV/ exists (see README).",
+    },
+    # Version-21: the same questions with BIRD's annotation errors fixed (questions, hints, correct SQL and
+    # 10 column descriptions), by the UIUC Kang lab; the databases are BIRD's own, linked (see README)
+    "bird_corrected": {
+        "name": "BIRD Mini-Dev, corrected", "short": "BIRD fixed",
+        "path": BIRD_CORRECTED_DIR / "arcwise_plat_full_with_diff.json",  # their file, unchanged
+        "databases": BIRD_CORRECTED_DIR / "dev_databases",                  # BIRD's databases + fixed descriptions
+        "difficulty_from": BIRD_MINI_DEV_DIR / "mini_dev_sqlite.json",      # their file has no difficulty
+        "about": "BIRD Mini-Dev's 498 questions with annotation errors fixed (Arcwise-Plat, UIUC Kang lab, PVLDB 19): "
+                 "wrong correct-SQL, unclear questions and hints, column descriptions.",
+        "missing": "Not downloaded. See README, Version-21 (BIRD Mini-Dev, corrected).",
     },
 }
 
@@ -80,10 +92,15 @@ def load_questions(suite: str) -> List[Dict]:
     raw = json.loads(info["path"].read_text(encoding="utf-8"))
     if "databases" not in info:
         return [{**q, "n": i, "db_id": q.get("db_id", "retail_store")} for i, q in enumerate(raw, 1)]
+    difficulty = {}
+    if info.get("difficulty_from") and info["difficulty_from"].exists():
+        difficulty = {str(q["question_id"]): q["difficulty"]
+                      for q in json.loads(info["difficulty_from"].read_text(encoding="utf-8"))}
     # BIRD's fields -> ours; the gold SQL stays out of everything Scout is given
     return [{
-        "n": i, "id": q["question_id"], "db_id": q["db_id"], "question": q["question"],
-        "evidence": q.get("evidence") or "", "gold_sql": q["SQL"], "difficulty": q["difficulty"],
+        "n": i, "id": int(q["question_id"]), "db_id": q["db_id"], "question": q["question"],
+        "evidence": q.get("evidence") or "", "gold_sql": q["SQL"],
+        "difficulty": q.get("difficulty") or difficulty.get(str(q["question_id"]), ""),
     } for i, q in enumerate(raw, 1)]
 
 
@@ -171,6 +188,44 @@ class EvalRunner:
         }
         self._save()
         return self._launch(questions, wait)
+
+    def check(self, suite: str, question_id: int, wait: bool = False) -> Dict:
+        """
+        Version-21: one question again, to see if a fix worked (started from its issue). Saved in
+        runs/checks/, apart from the runs: it never changes the Evaluation tab's scores, the run
+        list, BIRD's prediction files, or the Issues list (a wrong answer isn't logged again).
+        """
+        if self.busy():
+            raise RuntimeError("An evaluation is already running. Try again when it finishes.")
+        if suite not in SUITES or not SUITES[suite]["path"].exists():
+            raise ValueError("That test suite isn't available.")
+        q = next((q for q in load_questions(suite) if str(q["id"]) == str(question_id)), None)
+        if q is None:
+            raise ValueError(f"Question {question_id} isn't in that suite.")
+        info = SUITES[suite]
+        self.run = {
+            "id": datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4],
+            "check": True, "question_id": q["id"],
+            "suite": suite, "benchmark": info["name"], "short": info["short"], "sample": False,
+            "status": "running", "message": None, "run_at": now(), "finished_at": None,
+            "model": LLM_MODEL_SQL, "provider": PROVIDERS[LLM_PROVIDER]["name"],
+            "mode": "No user: the first meaning and the steps are accepted as written",
+            "planned": [q["id"]], "range": [q["n"], q["n"]],
+            "hints": "BIRD's evidence" if "databases" in info else "none", "current": None, "wait_until": None,
+            "elapsed_seconds": 0, "results": [],
+        }
+        self._save()
+        return self._launch([q], wait)
+
+    def checks(self, question_id) -> List[Dict]:
+        """Every check of one question, newest first."""
+        folder = self.runs_dir / CHECKS_FOLDER
+        out = []
+        for path in sorted(folder.glob("*.json"), reverse=True) if folder.exists() else []:
+            run = json.loads(path.read_text(encoding="utf-8"))
+            if str(run.get("question_id")) == str(question_id):
+                out.append(run)
+        return out
 
     def resume(self, run_id: str, wait: bool = False) -> Dict:
         if self.busy():
@@ -280,7 +335,11 @@ class EvalRunner:
         for attempt in range(EVAL_RATE_LIMIT_TRIES):
             tag = f"eval:{self.run['id']}:{q['id']}:{attempt}"
             began = time.monotonic()
-            result, meaning, steps = self._flow(q, tag)
+            try:
+                result, meaning, steps = self._flow(q, tag)
+            except Exception as e:  # a bug in Scout fails this question, never the whole run (Version-21)
+                print(f"[Eval] {q['id']}: Scout stopped on an error: {e!r}")
+                result, meaning, steps = {"error": f"Scout stopped on an error: {e}"}, "", []
             # a 429 shows in the error (meaning, steps) or only in the SQL tries' reasons
             if not is_rate_limited(f"{result.get('error') or ''} {result.get('failure_reason') or ''}"):
                 return self._score(q, tag, result, meaning, steps, time.monotonic() - began)
@@ -305,12 +364,13 @@ class EvalRunner:
         if not databases:
             return self.pipeline
         with self._lock:
-            if db_id not in self._pipelines:
+            key = (suite, db_id)  # BIRD and corrected BIRD share database names, not descriptions
+            if key not in self._pipelines:
                 folder = databases / db_id
                 if not folder.is_dir() or self.pipeline_for is None:
                     raise RuntimeError(f"BIRD database {db_id} isn't available.")
-                self._pipelines[db_id] = self.pipeline_for(folder)
-            return self._pipelines[db_id]
+                self._pipelines[key] = self.pipeline_for(folder)
+            return self._pipelines[key]
 
     def _pipeline(self, q: Dict):
         return self.pipeline_for_db(self.run["suite"], q["db_id"])
@@ -348,10 +408,18 @@ class EvalRunner:
     def _score(self, q: Dict, tag: str, result: Dict, meaning: str, steps: List[str], seconds: float) -> Dict:
         # the gold SQL is read only here, after Scout has answered
         pipeline = self._pipeline(q)
-        _, gold_rows = pipeline.database.run(q["gold_sql"])
-        saved = pipeline.results.get(result["result_id"]) if result.get("result_id") else None
-        rows = saved["rows"] if saved else result.get("rows", [])
+        # both answers are compared whole, as BIRD's evaluation does: the app keeps only the first
+        # 200 rows, and an answer without DISTINCT can show only some of its values there (Version-21)
+        _, gold_rows = pipeline.database.run_all(q["gold_sql"])
         error = result.get("error")
+        rows = []
+        if not error and result.get("sql"):
+            try:
+                _, rows = pipeline.database.run_all(result["sql"])
+            except Exception as e:  # ran in the app, but not again whole: fall back to what was kept
+                print(f"[Eval] {q['id']}: scoring on the kept rows ({e})")
+                saved = pipeline.results.get(result["result_id"]) if result.get("result_id") else None
+                rows = saved["rows"] if saved else result.get("rows", [])
         correct = not error and as_set(rows) == as_set(gold_rows)
         if correct:
             outcome = "right"
@@ -375,7 +443,7 @@ class EvalRunner:
             "error": error, "expected_rows": gold_rows[:10], "rows": rows[:10],
             "confidence": result.get("confidence"), "seconds": round(seconds, 1), **calls,
         }
-        if not correct:
+        if not correct and not self.run.get("check"):
             usage.usage_store.add_issue("eval", q["question"], {
                 "eval_id": q["id"], "db_id": entry["db_id"], "suite": self.run["suite"],
                 "difficulty": entry["difficulty"], "trap": q.get("trap") or q.get("evidence"),
@@ -388,14 +456,18 @@ class EvalRunner:
         with self._lock:
             self.run.update(status=status, message=message, current=None, wait_until=None, finished_at=now())
         self._save()
+        if self.run.get("check"):  # the Evaluation tab goes back to showing the newest real run
+            with self._lock:
+                self.run = None
 
     def _save(self) -> None:
         with self._lock:
             text = json.dumps(self.run, indent=1, default=str)
             run_id = self.run["id"]
-        self.runs_dir.mkdir(parents=True, exist_ok=True)
-        (self.runs_dir / f"{run_id}.json").write_text(text + "\n", encoding="utf-8")
-        if SUITES.get(self.run.get("suite"), {}).get("databases"):
+        folder = self.runs_dir / CHECKS_FOLDER if self.run.get("check") else self.runs_dir
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{run_id}.json").write_text(text + "\n", encoding="utf-8")
+        if SUITES.get(self.run.get("suite"), {}).get("databases") and not self.run.get("check"):
             self._save_predictions()
 
     def _save_predictions(self) -> None:

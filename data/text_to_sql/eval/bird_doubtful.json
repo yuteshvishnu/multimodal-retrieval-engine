@@ -1,0 +1,13 @@
+{
+  "about": "BIRD Mini-Dev questions whose correct answer we checked by hand and believe is wrong. They still count as wrong in every score (the official, strict number never changes); the Evaluation tab only labels them, so Scout's real mistakes can be told apart from benchmark errors. BIRD's own files are never edited. Key = BIRD's question_id.",
+  "questions": {
+    "1481": {
+      "reason": "BIRD's SQL keeps only rows equal to the minimum consumption of the whole table (one negative month, -582,092.86, for a single KAM customer) instead of the lowest consumer in each segment as the evidence says, and divides every segment's total by the count of all matching rows (1). So its answer is 0 - 0, 0 - (-582,092.86), ... Scout followed the evidence: per segment, CZK, 2013.",
+      "checked": "2026-11-03"
+    },
+    "1482": {
+      "reason": "BIRD's SQL has no currency filter, though the question asks about consumption paid in EUR (CZK customers use about 200 times more, so its numbers are really about CZK); it divides by the 2012 consumption, though its own evidence says divide by 2013; and it returns three unnamed percentages instead of which segment has the biggest and lowest increase. Scout followed the question and the evidence: EUR only, (2013 - 2012) / 2013 x 100, segment names.",
+      "checked": "2026-11-03"
+    }
+  }
+}

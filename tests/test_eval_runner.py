@@ -15,6 +15,11 @@ QUESTIONS = load_questions("practice")[:3]
 GOLD = {q["gold_sql"]: [[i]] for i, q in enumerate(QUESTIONS)}
 
 
+def run_all(sql):
+    """The stand-in database: a correct SQL gives its rows, Scout's "SELECT 7" gives 7."""
+    return ["n"], GOLD[sql] if sql in GOLD else [[int(sql.split()[1])]]
+
+
 @pytest.fixture(autouse=True)
 def store(tmp_path, monkeypatch):
     s = usage.UsageStore(tmp_path / "usage.sqlite")
@@ -49,7 +54,7 @@ def fake_pipeline(answers, store, seen, seen_history=None):
 
     return types.SimpleNamespace(
         interpret=interpret, plan=plan, run=run,
-        database=types.SimpleNamespace(run=lambda sql: (["n"], GOLD[sql])),
+        database=types.SimpleNamespace(run_all=run_all),
         results=types.SimpleNamespace(get=lambda result_id: None),
     )
 
@@ -238,7 +243,7 @@ def bird_scout(db_folder, asked):
         interpret=interpret,
         plan=lambda question, meaning, question_id=None: {"steps": ["Take it"]},
         run=lambda question, meaning, question_id=None, steps=None, save=True: {"rows": rows, "sql": "SELECT\n  x FROM t"},
-        database=types.SimpleNamespace(run=lambda sql: (["x"], [list(r) for r in con.execute(sql)])),
+        database=types.SimpleNamespace(run_all=lambda sql: (["x"], [list(r) for r in con.execute(sql)])),
         results=types.SimpleNamespace(get=lambda result_id: None),
     )
 
@@ -305,3 +310,103 @@ def test_bird_stays_out_of_what_normal_scout_sees():
 
     scout_folder = (ROOT_DIR / "data/text_to_sql").resolve()
     assert scout_folder not in BIRD_MINI_DEV_DIR.resolve().parents
+
+
+def test_answers_are_scored_on_every_row_not_the_200_the_app_keeps(store, tmp_path):
+    """BIRD #1506: Scout's SQL (no DISTINCT) gave 933 rows holding all 21 products; the first 200
+    held only 4 of them, so comparing the kept rows scored a right answer wrong."""
+    import sqlite3
+
+    from backend.eval_runner import as_set
+
+    con = sqlite3.connect(":memory:")
+    con.execute("CREATE TABLE sales (product TEXT)")
+    con.executemany("INSERT INTO sales VALUES (?)", [("Nafta",)] * 300 + [("LPG",), ("Natural",)])
+    gold_sql, scout_sql = "SELECT DISTINCT product FROM sales", "SELECT product FROM sales"
+    kept = [list(r) for r in con.execute(scout_sql).fetchmany(200)]  # what the app keeps: only 'Nafta'
+    assert as_set(kept) != as_set(con.execute(gold_sql).fetchall())
+
+    pipeline = types.SimpleNamespace(
+        database=types.SimpleNamespace(run_all=lambda sql: (["product"], [list(r) for r in con.execute(sql)])),
+        results=types.SimpleNamespace(get=lambda result_id: None),
+    )
+    runner = EvalRunner(pipeline, tmp_path / "runs", sleep=lambda s: None)
+    runner.run = {"id": "r", "suite": "practice"}
+    q = {"id": 1506, "db_id": "retail_store", "question": "Products sold?", "gold_sql": gold_sql}
+    entry = runner._score(q, "eval:r:1506", {"rows": kept[:10], "sql": scout_sql}, "", [], 1.0)
+    assert entry["correct"] and entry["outcome"] == "right"
+
+
+def test_one_question_can_be_checked_again_without_touching_the_runs(store, tmp_path):
+    """Version-21: Issues -> Run this question again. One question by its id, saved in runs/checks/:
+    not a run (scores, run list unchanged) and a wrong answer doesn't log another issue."""
+    seen = []
+    runner = EvalRunner(fake_pipeline([{"rows": [[99]], "sql": "SELECT 99"}], store, seen), tmp_path / "runs",
+                        sleep=lambda s: None)
+    second = QUESTIONS[1]
+    runner.check("practice", second["id"], wait=True)
+
+    assert not list((tmp_path / "runs").glob("*.json"))  # no run file: the Evaluation tab is unchanged
+    assert runner.progress() is None and runner.finished_runs() == []
+    checks = runner.checks(second["id"])
+    assert len(checks) == 1 and checks[0]["status"] == "finished" and checks[0]["range"] == [2, 2]
+    result = checks[0]["results"][0]
+    assert result["id"] == second["id"] and result["outcome"] == "wrong rows" and result["llm_calls"] == 3
+    assert store.issues(scope=["eval"])["total"] == 0  # already an issue: not logged again
+    assert runner.checks(QUESTIONS[0]["id"]) == []
+    with pytest.raises(ValueError):
+        runner.check("practice", 999999)
+
+
+def test_corrected_bird_takes_its_own_questions_and_answers_and_birds_difficulty(tmp_path, monkeypatch):
+    """Version-21: the corrected Mini-Dev (string ids, no difficulty) on BIRD's databases with other
+    descriptions; a Scout per suite and database, since the two suites share database names."""
+    from backend import eval_runner
+
+    root = fake_bird(tmp_path, monkeypatch)
+    fixed = [{"question_id": "205", "db_id": "zoo", "question": "Which animal, by name?", "evidence": "",
+              "SQL": "SELECT x + 1 FROM t", "original_SQL": "SELECT x FROM t"}]
+    (tmp_path / "fixed.json").write_text(json.dumps(fixed))
+    monkeypatch.setitem(eval_runner.SUITES, "bird_corrected", {
+        **eval_runner.SUITES["bird_corrected"], "path": tmp_path / "fixed.json",
+        "databases": root / "dev_databases", "difficulty_from": root / "mini_dev_sqlite.json"})
+    questions = load_questions("bird_corrected")
+    assert questions == [{"n": 1, "id": 205, "db_id": "zoo", "question": "Which animal, by name?", "evidence": "",
+                          "gold_sql": "SELECT x + 1 FROM t", "difficulty": "moderate"}]
+    made = []
+    runner = EvalRunner(None, tmp_path / "runs", pipeline_for=lambda folder: made.append(folder) or object())
+    assert runner.pipeline_for_db("bird_minidev", "zoo") is not runner.pipeline_for_db("bird_corrected", "zoo")
+    runner.pipeline_for_db("bird_corrected", "zoo")
+    assert len(made) == 2  # one each, then reused
+    assert eval_runner.is_benchmark("bird_corrected")  # fixes from its issues are never applied either
+
+
+def test_a_crash_on_one_question_fails_that_question_not_the_run(store, tmp_path):
+    """Version-21: BIRD (corrected) #1317 stopped a 50-question run at 31: Scout wrote 'Women's Soccer'
+    (an unclosed quote), and sqlglot's TokenError wasn't caught. Now the question is "no answer"."""
+    seen = []
+    pipeline = fake_pipeline([{"rows": [[1]], "sql": "SELECT 1"}], store, seen)
+
+    def run(question, meaning, question_id=None, steps=None, save=True):
+        raise RuntimeError("Error tokenizing ' 'Women's Soccer'")
+
+    answers = iter([run, None])
+    real_run = pipeline.run
+    pipeline.run = lambda *a, **k: (next(answers) or real_run)(*a, **k)
+    runner = EvalRunner(pipeline, tmp_path / "runs", sleep=lambda s: None)
+    progress = runner.start("practice", last=2, wait=True)
+    assert progress["status"] == "finished" and progress["done"] == 2
+    first = json.loads((tmp_path / "runs" / f"{progress['id']}.json").read_text())["results"][0]
+    assert first["outcome"] == "no answer" and "Women's Soccer" in first["error"]
+
+
+def test_an_unclosed_quote_is_an_sql_problem_not_a_crash():
+    """sqlglot raises TokenError (not ParseError) on an unclosed quote: every check now handles it."""
+    from backend.text_to_sql.checks import merged_records, tables_in_sql
+    from backend.text_to_sql.safety import write_problems
+
+    sql = "SELECT COUNT(*) FROM event e WHERE e.event_name = 'Women's Soccer'\n  AND e.size = 'Medium'"
+    assert tables_in_sql(sql, ["event"]) == []
+    assert merged_records(sql, [], lambda s: ([], [])) == []
+    assert write_problems(sql) == []  # unreadable, but no write keyword: SQLite decides if it's valid
+    assert write_problems("DELETE FROM event WHERE name = 'Women's'") == ["DELETE"]

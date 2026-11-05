@@ -186,3 +186,31 @@ def _check_values(
 def _quote(name: str) -> str:
     """Quote names with spaces or symbols (BIRD has some), leave simple ones as is."""
     return name if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) else f'"{name}"'
+
+
+def column_meanings(
+    conn: sqlite3.Connection, alias: str, descriptions: Dict[str, Dict[str, dict]] | None, statements: Dict[str, str]
+) -> Dict[str, Dict[str, str]]:
+    """
+    Version-20: what each column means, for the schema catalog: {table: {column: text}}, names
+    lowercased. From the description files when there are any (the same one-line comment as
+    before), else from the comments in schema.sql's CREATE TABLE statements.
+    """
+    meanings: Dict[str, Dict[str, str]] = {}
+    if descriptions:
+        tables = [r[0] for r in conn.execute(
+            f"SELECT name FROM \"{alias}\".sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )]
+        for table in tables:
+            table_desc = descriptions.get(table.lower(), {})
+            for _, name, col_type, _, _, _ in conn.execute(f'PRAGMA "{alias}".table_info("{table}")'):
+                desc = table_desc.get(name.lower())
+                if desc:
+                    text = _comment(desc, col_type or "")
+                    if text:
+                        meanings.setdefault(table.lower(), {})[name.lower()] = text
+        return meanings
+    for table, statement in statements.items():
+        for match in re.finditer(r'^\s*"?([^"\s,(]+)"?\s+\w+[^\n]*?--\s*(.+)$', statement, re.MULTILINE):
+            meanings.setdefault(table.lower(), {})[match.group(1).lower()] = match.group(2).strip()
+    return meanings

@@ -36,3 +36,4 @@ data/usage/
 # evaluation runs started from the app (results of each run; large for BIRD)
 data/text_to_sql/eval/runs/
 data/benchmarks/
+data/catalogs/

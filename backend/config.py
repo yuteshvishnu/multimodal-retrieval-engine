@@ -54,6 +54,10 @@ MAX_RESULT_ROWS = 200            # rows kept per query; fetch one more to know i
 PAGE_SIZE = 10                   # rows per page in the UI
 QUERY_TIMEOUT_SECONDS = 5        # a query running longer than this is stopped
 MAX_ESTIMATED_READS = 1_000_000  # rows a query may read, estimated from its plan before running
+# Version-20: off for now. The estimate can be far off (BIRD #1482: ~1.9M estimated, ran in 0.03 s),
+# so a query over the limit runs anyway, with a warning, and the time limit (QUERY_TIMEOUT_SECONDS)
+# is the real guard. True brings back Version-8's refusal.
+BLOCK_ESTIMATED_READS = False
 RESULT_CACHE_SIZE = 10           # most recent results kept for paging (least recently used is dropped)
 ANSWER_CACHE_SIZE = 10           # Version-12: recent answers reused when the same question comes back
 
@@ -74,6 +78,14 @@ QUERY_CONNECTIONS = 4            # queries that can run at the same time (one sl
 # Kept outside data/text_to_sql/ on purpose: Scout attaches every .sqlite file in that folder,
 # so BIRD's databases (and their questions) stay out of the app until an evaluation run uses them.
 BIRD_MINI_DEV_DIR = ROOT_DIR / "data/benchmarks/bird/minidev/MINIDEV"
+# Version-21: BIRD Mini-Dev with annotation errors fixed (Jin, Choi, Zhu, Kang, PVLDB 19: "Pervasive
+# Annotation Errors Break Text-to-SQL Benchmarks and Leaderboards"; github.com/uiuc-kang-lab/text_to_sql_benchmarks)
+BIRD_CORRECTED_DIR = ROOT_DIR / "data/benchmarks/bird/corrected"
+
+# Version-20: the schema catalogs (one folder per database: catalog.json + values.sqlite), built
+# offline from the data when a database is first opened, rebuilt only when it changes. Generated,
+# so git-ignored; rebuilt any time with: python -m scripts.text_to_sql.onboard
+CATALOG_DIR = ROOT_DIR / "data/catalogs"
 
 # Text-to-SQL Version-5: the user confirms what the question means first; at most this many sets of options
 MAX_CLARIFY_ROUNDS = 3

@@ -63,8 +63,9 @@ Do not invent columns, values or meanings.
 
 
 def fingerprint(table: dict) -> str:
-    """Changes when the table's columns or descriptions change (not when rows change)."""
-    return hashlib.sha256(table["schema"].encode("utf-8")).hexdigest()
+    """Changes when the table's columns or descriptions change (not when rows change). Version-20:
+    the schema without the data profile, so new rows or a new profile don't make a summary stale."""
+    return hashlib.sha256(table.get("base_schema", table["schema"]).encode("utf-8")).hexdigest()
 
 
 def load_summaries(folder: Path) -> Dict[str, dict]:

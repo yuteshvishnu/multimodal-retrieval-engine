@@ -7,15 +7,17 @@ from collections import defaultdict
 from contextlib import contextmanager
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import sqlglot
 from sqlglot import exp
 
-from backend.config import MAX_RESULT_ROWS, QUERY_CONNECTIONS, QUERY_TIMEOUT_SECONDS
-from backend.text_to_sql.checks import profile_table
-from backend.text_to_sql.descriptions import annotated_schema, load_descriptions, table_document
+from backend.config import MAX_RESULT_ROWS, QUERY_CONNECTIONS, QUERY_TIMEOUT_SECONDS, SHARE_ROWS_WITH_LLM
+from backend.text_to_sql import column_notes, schema_catalog, value_index
+from backend.text_to_sql.descriptions import _quote, annotated_schema, column_meanings, load_descriptions, table_document
 from backend.text_to_sql.table_summaries import fresh_summary, load_summaries
+
+ALL_ROWS_LIMIT = 1_000_000  # run_all: more rows than this is an error, not a silent cut
 
 
 class QueryTimeout(Exception):
@@ -41,6 +43,7 @@ class SQLiteDatabase:
 
         self.aliases: List[str] = [path.stem.replace('"', "") for path in self.files]
         self.lock = threading.Lock()  # guards the main connection
+        self._value_files: Dict[str, Path] = {}  # alias -> its values.sqlite (Version-20)
 
         self.conn = self._connect()
         self._pool: "queue.Queue[sqlite3.Connection]" = queue.Queue()
@@ -70,22 +73,27 @@ class SQLiteDatabase:
     @cached_property
     def tables(self) -> List[dict]:
         """
-        One entry per table, in every attached file:
+        One entry per table, in every attached file, read from its schema catalog
+        (Version-20, schema_catalog.py: built offline once per database, rebuilt only when
+        the file or its descriptions change):
 
-            name      table name
-            database  name of the attached database it lives in
-            folder    folder of its .sqlite file (where its index files live)
-            schema    CREATE TABLE statement, from the best source available:
-                      1. database_description/ (BIRD format): every column annotated
-                      2. schema.sql next to the .sqlite file: hand-written comments
-                      3. plain CREATE TABLE statement from the database
-            doc       text embedded to find relevant tables (Version-3): the LLM summary
-                      from table_summaries.json if it's up to date, else a column template
-            links     names of the tables it references with foreign keys
-            columns   [{"name", "type"}] in table order
-            summary   the LLM summary (None if missing or out of date); reviewed: the user
-                      confirmed or corrected it (Version-6); feedback: the user's corrections
-            row_count, profile   what each column really contains (Version-4 checks)
+            name         table name
+            database     name of the attached database it lives in
+            folder       folder of its .sqlite file (where its index files live)
+            schema       the CREATE TABLE text the LLM sees: every column with its meaning (the
+                         description file, else schema.sql comments) and what's in it, chosen by
+                         its kind (all values of a category, a number's range, a date's format
+                         and range, ...), and its links to other tables
+            base_schema  the same without the data profile (the LLM summaries are tied to it,
+                         so a new profile doesn't make them out of date)
+            catalog      the table's catalog entry: row count, keys, links, every column's profile
+            doc          text embedded to find relevant tables (Version-3): the LLM summary
+                         from table_summaries.json if it's up to date, else a column template
+            links        names of the tables it links to (declared, or inferred from the data)
+            columns      [{"name", "type", "kind", "note"}] in table order
+            summary      the LLM summary (None if missing or out of date); reviewed: the user
+                         confirmed or corrected it (Version-6); feedback: the user's corrections
+            row_count, profile   what the Version-4 checks read
 
         Built once, then reused.
         """
@@ -105,41 +113,76 @@ class SQLiteDatabase:
             elif schema_file.exists():
                 statements = _split_schema_sql(schema_file.read_text(encoding="utf-8"))
 
+            catalog = self._catalog(path, alias, descriptions, statements)
+            ai_notes = column_notes.load(path, alias)  # optional AI notes for undescribed columns
             summaries = load_summaries(path.parent)
             summarized = 0
 
-            rows = self.conn.execute(
+            plain = dict(self.conn.execute(
                 f"SELECT name, sql FROM \"{alias}\".sqlite_master "
-                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL ORDER BY rowid"
-            ).fetchall()
-            for name, plain_sql in rows:
-                info = self.conn.execute(f'PRAGMA "{alias}".table_info("{name}")').fetchall()
-                columns = [col[1] for col in info]
-                links = {fk[2] for fk in self.conn.execute(f'PRAGMA "{alias}".foreign_key_list("{name}")')}
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL"
+            ).fetchall())
+            for name, entry in catalog["tables"].items():
+                notes = ai_notes.get(name, {})
+                if notes:
+                    entry = {**entry, "columns": [
+                        {**c, "ai_note": notes[c["name"]]} if c["name"] in notes and not c["description"] else c
+                        for c in entry["columns"]
+                    ]}
                 table = {
                     "name": name,
                     "database": alias,
                     "folder": path.parent,
-                    "schema": statements.get(name, plain_sql),
-                    "links": links - {name},
-                    "columns": [{"name": col[1], "type": col[2] or ""} for col in info],
+                    "schema": schema_catalog.render_schema(name, entry, SHARE_ROWS_WITH_LLM, _quote),
+                    "base_schema": statements.get(name, plain.get(name, "")),
+                    "catalog": entry,
+                    "links": {link["table"] for link in entry["links"]} - {name},
+                    "columns": [
+                        {"name": c["name"], "type": c["type"], "kind": c["kind"],
+                         "note": schema_catalog.column_note(c, SHARE_ROWS_WITH_LLM)}
+                        for c in entry["columns"]
+                    ],
+                    "row_count": entry["row_count"],
+                    "profile": {c["name"]: schema_catalog.legacy_profile(c) for c in entry["columns"]},
                 }
-                table["row_count"], table["profile"] = profile_table(self.conn, alias, name)
-
                 summary = fresh_summary(table, summaries)
-                entry = summaries.get(name, {})
+                saved = summaries.get(name, {})
                 table["summary"] = summary
-                table["reviewed"] = bool(summary and entry.get("reviewed"))
-                table["feedback"] = entry.get("feedback", [])
+                table["reviewed"] = bool(summary and saved.get("reviewed"))
+                table["feedback"] = saved.get("feedback", [])
                 if summary:
                     table["doc"] = f"Table {name.replace('_', ' ')}: {summary}"
                     summarized += 1
                 else:
-                    table["doc"] = table_document(name, columns, (descriptions or {}).get(name.lower()))
+                    table["doc"] = table_document(name, [c["name"] for c in entry["columns"]],
+                                                  (descriptions or {}).get(name.lower()))
                 tables.append(table)
 
-            print(f"[Summaries] {alias}: {summarized}/{len(rows)} tables have an up-to-date LLM summary")
+            print(f"[Summaries] {alias}: {summarized}/{len(catalog['tables'])} tables have an up-to-date LLM summary")
         return tables
+
+    def _catalog(self, path: Path, alias: str, descriptions, statements: Dict[str, str]) -> dict:
+        """
+        Offline onboarding (Version-20): the saved catalog and value index if they're up to
+        date, else built now from the data (no LLM) and saved for next time.
+        """
+        folder = schema_catalog.catalog_dir(path, alias)
+        catalog = schema_catalog.load(path, alias)
+        if catalog is None or not (folder / "values.sqlite").exists():
+            began = time.monotonic()
+            catalog = schema_catalog.build(self.conn, alias, path, column_meanings(self.conn, alias, descriptions, statements))
+            folder = schema_catalog.save(catalog, path, alias)
+            count = value_index.build(self.conn, alias, catalog, folder / "values.sqlite")
+            print(f"[Catalog] {alias}: onboarded {len(catalog['tables'])} tables, {count:,} values indexed "
+                  f"in {time.monotonic() - began:.1f}s")
+        self._value_files[alias] = folder / "values.sqlite"
+        return catalog
+
+    @cached_property
+    def values(self) -> value_index.ValueIndex:
+        """Version-20: the value index of every attached database (built with the catalog)."""
+        self.tables  # onboards any database that isn't yet
+        return value_index.ValueIndex(self._value_files)
 
     def preview(self, alias: str, table: str, page: int, page_size: int) -> Tuple[List[str], List[List[Any]]]:
         """One page of a table's rows, for the Tables tab."""
@@ -176,12 +219,25 @@ class SQLiteDatabase:
         columns, rows, _ = self.query(sql)
         return columns, rows
 
-    def query(self, sql: str, timeout: float = QUERY_TIMEOUT_SECONDS) -> Tuple[List[str], List[List[Any]], bool]:
+    def run_all(self, sql: str, timeout: float = QUERY_TIMEOUT_SECONDS) -> Tuple[List[str], List[List[Any]]]:
         """
-        Run a single SELECT query and return (columns, rows, more): at most max_rows rows,
-        and more=True if there were more than that (one extra row is fetched to know).
-        Raises QueryTimeout if it runs longer than `timeout` seconds (Version-8).
+        Every row of a SELECT (up to ALL_ROWS_LIMIT), for scoring an evaluation: BIRD compares the whole
+        result, and the first max_rows rows of an answer without DISTINCT can hold only some of
+        its values (Version-21).
         """
+        columns, rows, more = self.query(sql, timeout, max_rows=ALL_ROWS_LIMIT)
+        if more:
+            raise ValueError(f"more than {ALL_ROWS_LIMIT:,} rows")
+        return columns, rows
+
+    def query(self, sql: str, timeout: float = QUERY_TIMEOUT_SECONDS,
+              max_rows: Optional[int] = None) -> Tuple[List[str], List[List[Any]], bool]:
+        """
+        Run a single SELECT query and return (columns, rows, more): at most max_rows rows
+        (self.max_rows unless given), and more=True if there were more than that (one extra
+        row is fetched to know). Raises QueryTimeout if it runs longer than `timeout` seconds (Version-8).
+        """
+        limit = self.max_rows if max_rows is None else max_rows
         if not sql.lstrip().lower().startswith(("select", "with")):
             raise ValueError("Only SELECT queries are allowed.")
 
@@ -198,7 +254,7 @@ class SQLiteDatabase:
             try:
                 cursor = conn.execute(sql)
                 columns = [col[0] for col in cursor.description]
-                rows = cursor.fetchmany(self.max_rows + 1)
+                rows = cursor.fetchmany(limit + 1)
             except sqlite3.OperationalError as e:
                 if "interrupted" in str(e).lower():
                     raise QueryTimeout(f"took longer than {timeout:g} s") from None
@@ -206,11 +262,11 @@ class SQLiteDatabase:
             finally:
                 conn.set_progress_handler(None, 0)
 
-        more = len(rows) > self.max_rows
+        more = len(rows) > limit
         # BLOBs can't be sent as JSON
         clean_rows = [
             [f"<{len(v)} bytes>" if isinstance(v, bytes) else v for v in row]
-            for row in rows[: self.max_rows]
+            for row in rows[:limit]
         ]
         return columns, clean_rows, more
 
@@ -233,7 +289,7 @@ class SQLiteDatabase:
         try:
             for table in sqlglot.parse_one(sql, read="sqlite").find_all(exp.Table):
                 aliases[table.alias_or_name.lower()] = table.name.lower()
-        except sqlglot.errors.ParseError:
+        except sqlglot.errors.SqlglotError:  # ParseError, and TokenError (an unclosed quote)
             pass
 
         children = defaultdict(list)

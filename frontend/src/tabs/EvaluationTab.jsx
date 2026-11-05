@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getJson, postForm } from "../api.js";
 import { AccuracyRing, ErrorAlert, Icon, Loading, Pagination, SqlCode } from "../components/ui.jsx";
-import IssuesView from "./IssuesView.jsx";
+import IssuesView, { RecheckSection } from "./IssuesView.jsx";
 
 // Evaluation (Version-13): how accurate Scout is on a benchmark (BIRD), and why it got questions
 // wrong. Two views: Accuracy check (the score and every question) and Issues (the eval's wrong
@@ -129,6 +129,13 @@ function AccuracyView({ active, onOpenIssues, onRunFinished }) {
     { id: "all", label: "All", count: summary?.total },
     { id: "right", label: "Right", count: summary?.correct },
     { id: "wrong", label: "Wrong", count: wrong },
+    // Version-19: wrong answers split into Scout's mistakes and BIRD answers we believe are wrong
+    ...(summary?.doubtful
+      ? [
+          { id: "scout", label: "Scout's mistakes", count: wrong - summary.doubtful },
+          { id: "doubtful", label: "BIRD doubtful", count: summary.doubtful },
+        ]
+      : []),
   ];
 
   return (
@@ -233,7 +240,7 @@ function AccuracyView({ active, onOpenIssues, onRunFinished }) {
             </div>
           )}
           {list?.items.map((r) => (
-            <ResultRow key={r.id} result={r} sample={summary.sample} onOpenIssues={onOpenIssues} />
+            <ResultRow key={r.id} result={r} sample={summary.sample} suite={summary.suite} onOpenIssues={onOpenIssues} />
           ))}
           {list && (
             <Pagination page={list.page} pages={list.pages} total={list.total} label="questions" onPage={(p) => loadResults(p)} always />
@@ -260,7 +267,7 @@ function Scorecard({ summary }) {
             {summary.correct} of {summary.total} right
           </h2>
           <p className="muted">
-            {summary.databases} databases · {summary.model}
+            {summary.databases} database{summary.databases === 1 ? "" : "s"} · {summary.model}
             {summary.provider && <> via {summary.provider}</>}
             {summary.run_at && <> · {formatDate(summary.run_at)}</>}
           </p>
@@ -272,6 +279,12 @@ function Scorecard({ summary }) {
               </span>
             ))}
           </div>
+          {summary.doubtful > 0 && (
+            <p className="muted small">
+              {summary.doubtful} of the {summary.total - summary.correct} wrong answers {summary.doubtful === 1 ? "has" : "have"} a
+              BIRD answer we believe is wrong. {summary.doubtful === 1 ? "It still counts" : "They still count"} as wrong.
+            </p>
+          )}
         </div>
       </div>
 
@@ -319,7 +332,7 @@ function Scorecard({ summary }) {
 }
 
 // One question: right or wrong at a glance; opens to Scout's SQL beside the correct SQL.
-function ResultRow({ result: r, sample, onOpenIssues }) {
+function ResultRow({ result: r, sample, suite, onOpenIssues }) {
   const [open, setOpen] = useState(false);
   const outcome = OUTCOME[r.outcome] || OUTCOME["wrong rows"];
   return (
@@ -332,6 +345,7 @@ function ResultRow({ result: r, sample, onOpenIssues }) {
         <span className="eval-db muted">{r.db_id}</span>
         <span className={`eval-diff-tag ${r.difficulty}`}>{DIFFICULTY_LABEL[r.difficulty]}</span>
         {!r.correct && <span className={`badge ${outcome.style}`}>{outcome.label}</span>}
+        {r.doubtful && <span className="badge medium" title="We checked BIRD's answer by hand and believe it's wrong. Still counted as wrong.">BIRD answer doubtful</span>}
         <span className="chevron">
           <Icon name="chevron" />
         </span>
@@ -345,6 +359,15 @@ function ResultRow({ result: r, sample, onOpenIssues }) {
             </p>
           )}
           {r.error && <p className="problems">{r.error}</p>}
+          {r.doubtful && (
+            <div className="alert alert-warning">
+              <Icon name="alert" />
+              <span>
+                <strong>BIRD's answer looks wrong. </strong>
+                {r.doubtful} <span className="muted">(Still counted as wrong; listed in data/text_to_sql/eval/bird_doubtful.json.)</span>
+              </span>
+            </div>
+          )}
           <div className="eval-compare">
             <div>
               <div className="label">Scout's SQL</div>
@@ -378,6 +401,11 @@ function ResultRow({ result: r, sample, onOpenIssues }) {
                 </span>
               )}
             </p>
+          )}
+          {!sample && suite && (
+            <div className="eval-recheck">
+              <RecheckSection questionId={r.id} suite={suite} />
+            </div>
           )}
         </div>
       )}

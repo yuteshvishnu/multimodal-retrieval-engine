@@ -41,6 +41,9 @@ Rexie answers questions **only from our own data**. It's one app with two produc
   - [Version-16: Choose the LLM Provider (Groq or OpenRouter)](#version-16-choose-the-llm-provider-groq-or-openrouter)
   - [Version-17: BIRD Answer Format and Data-Checked Meanings](#version-17-bird-answer-format-and-data-checked-meanings)
   - [Version-18: BIRD Mini-Dev, Ready to Run](#version-18-bird-mini-dev-ready-to-run)
+  - [Version-19: Getting Better on BIRD](#version-19-getting-better-on-bird)
+  - [Version-20: Know the Data Before the Question (Schema Catalog)](#version-20-know-the-data-before-the-question-schema-catalog)
+  - [Version-21: BIRD Questions 11–30, One by One](#version-21-bird-questions-1130-one-by-one)
 - [The App (UI)](#the-app-ui)
 - [Dashboard (LLM Usage and Cost)](#dashboard-llm-usage-and-cost)
 - [Fixes](#fixes)
@@ -172,6 +175,9 @@ multimodal-retrieval-engine/
 │       ├── schema_index.py  #   Version-3: finds relevant tables with embeddings
 │       ├── table_summaries.py # Version-3: LLM-written table summaries; Version-6: rewrites from corrections
 │       ├── checks.py        #   Version-4: deterministic checks before and after running SQL
+│       ├── schema_catalog.py #  Version-20: offline onboarding: each column profiled by kind, links, the schema the LLM sees
+│       ├── value_index.py   #   Version-20: every short text value, searchable by the question's words
+│       ├── column_notes.py  #   Version-20: optional AI notes for undescribed columns (offline, opt-in)
 │       ├── interpreter.py   #   Version-5: up to 3 meanings of the question for the user to pick
 │       ├── planner.py       #   Version-10: the steps the user checks (re-run from their comments)
 │       ├── wording.py       #   Version-10: everyday words in what the user reads
@@ -187,6 +193,7 @@ multimodal-retrieval-engine/
 │       └── styles.css       #   design tokens (light + dark), layout
 ├── data/
 │   ├── benchmarks/bird/     # Version-18: BIRD Mini-Dev as downloaded (git-ignored; outside text_to_sql/ on purpose)
+│   ├── catalogs/            # Version-20: one catalog + value index per database (generated, git-ignored)
 │   ├── rag/                 # Scribe: documents (raw_docs), built index, eval set
 │   └── text_to_sql/         # Scout: one folder per database
 │       ├── retail_store/    #   practice DB, descriptions, 20 questions + answers
@@ -485,6 +492,9 @@ Each version fixed a problem the previous one exposed.
 | **Version-16:** LLM provider | Groq's free plan allowed ~20 eval questions a day | `LLM_PROVIDER` picks Groq or OpenRouter; OpenRouter calls are pinned to Crusoe then Groq and priced at their real cost |
 | **Version-17:** BIRD answer format | 8 of 20 practice answers were marked wrong only for format (joined names, rounding, extra count); one meaning asked for a city spelling the data doesn't have | Practice answers rewritten in BIRD's format, the same rule in Scout's steps and SQL prompts; when the checks find a value the data lacks, the meaning is asked again with the real values (2 meanings at most) |
 | **Version-18:** BIRD Mini-Dev | BIRD wasn't downloaded; Scout scans every database in its folder, so BIRD would have leaked into the app | BIRD's files kept as downloaded, outside Scout's folder; each question gets a Scout with only its own database; runs pick questions *from–to*; BIRD's prediction format is written too; fixes from BIRD issues can't be approved. First 10 Mini-Dev questions: **5/10** |
+| **Version-19:** Better on BIRD | The 5 misses in BIRD's first 10, one by one | 1. The LLM's wording of a meaning never blocks a question (a warning instead); only the final SQL check blocks. 2. A value the hint defines ("the month is the 5th–6th characters") is returned in that form. 3. BIRD answers we checked by hand and believe are wrong are labelled "BIRD answer doubtful" (still counted as wrong) |
+| **Version-20:** Schema catalog | Scout never saw what's in a column (BIRD #1484: `Segment` holds 'Discount', but Scout was told only "chain segment") | Offline onboarding builds one catalog per database (every column profiled by its kind, links declared and inferred) plus a value index; online, the LLM sees each column's meaning and contents, the question's words are matched to stored values, and a value missing from any text column is caught |
+| **Version-21:** BIRD 11–30 | BIRD questions 11–30 scored 8/20; the 12 misses, one by one | 1. Answers are scored on every row, not the first 200 the app keeps (#1506 was right but scored wrong). 2. "Is it true…? If so, how many?" returns only the value (#1486). 3. **Run this question again** from its issue or the Accuracy check, to see if a fix worked. 4. **BIRD Mini-Dev, corrected**: a second suite with BIRD's annotation errors fixed (UIUC Kang lab). 5. A broken quote in Scout's SQL no longer stops a run. Corrected BIRD 1–50: **42/50 (84%)** |
 
 ---
 
@@ -1081,6 +1091,174 @@ What the 5 misses show (a first look, for the next version):
 **Next version: get better on the benchmark.** Run more of Mini-Dev in ranges, sort the misses into Scout's mistakes, our checks' false alarms (like Q3) and doubtful BIRD answers, and fix them in general (never from BIRD's answers, see above).
 
 **Tested:** 6 new tests on a tiny fake BIRD folder in BIRD's layout (questions read from BIRD's fields; one Scout per database; evidence as the hint and the gold SQL never in what Scout is asked; BIRD's prediction format; the from–to range and bad ranges; BIRD fixes refused) and one that BIRD stays outside Scout's folder. All 141 pass. No evaluation or LLM call was run.
+
+
+### Version-19: Getting Better on BIRD
+
+The 5 misses in Mini-Dev's first 10 questions, taken one at a time.
+
+**1. The meaning's wording blocked a read question (BIRD #1473, "average monthly consumption… in 2013").** The meaning step understood it correctly (*"**Add** together all consumption values… and divide by 12"*, exactly BIRD's answer), but the Version-7 words check also read every meaning, saw it start with "add", and blocked the whole question as a possible write: "No answer".
+
+The meaning is the LLM's wording and can mean anything ("add" is usually arithmetic); only the final SQL shows what would really run. So:
+- **Meanings never block.** A meaning that sounds like a change (a write word, or the LLM marking it `changes_data`) gets a **warning** on that option: *"This sounds like it could change data. Scout only reads data: if the final query would change anything, it's rejected before it runs."* The user can still pick it; the steps and SQL stages no longer check the confirmed meaning either.
+- **The final SQL check is the hard stop**, unchanged: the SQL is read with the parser and anything but one plain read query never runs.
+- **The user's own question** is still checked first ("Delete all the stores" is stopped before any LLM call): those are the user's words, not the LLM's.
+
+**Tested:** 1 new test (a meaning starting "Add together…" only warns; its steps and SQL are still written; a `DELETE` from the SQL step is blocked and nothing runs; a write question from the user is still stopped). All 142 pass. No LLM calls.
+
+**2. The month came back as `201304`, BIRD expected `04` (BIRD #1480, "gas consumption peak month for SME customers in 2013").** Scout found the right month (April). But `Date` stores year and month together, and BIRD's evidence defines the month: *"the 5th and 6th string of the date can refer to month"*. The steps even said "group by the month part of the date"; the SQL grouped by the whole `Date` and returned it, which is what our Version-17 rule says: *"exactly as stored"*.
+
+"As stored" is right by default (don't join names, don't round), but a definition in the question or hint decides the output. Added to the SQL and steps prompts: *"When the question or its hint defines how a value is formed (e.g. 'the month is the 5th and 6th characters of Date'), return that value in exactly that form, not the stored column."* Prompt wording only: no new calls. Not yet checked with a run.
+
+**3. BIRD's own answer looks wrong (BIRD #1481, "difference in the annual average consumption of the customers with the least consumption paid in CZK for 2013 between SME and LAM, …").** Scout: −14,009.34, 6,046.62, 7,962.72. BIRD: 0.0, 582,092.86, −582,092.86. Running BIRD's SQL piece by piece showed its whole answer comes from **one row**: it keeps rows equal to the minimum consumption of the *entire* table (one negative month, −582,092.86, for a single KAM customer), not the lowest consumer in each segment as the evidence says, and divides every segment's total by the count of all matching rows (1). Scout followed the evidence (per segment, CZK, 2013). BIRD is known to have some wrong correct-answers, so changing Scout to match would teach it a wrong reading.
+
+So we **label** such questions, never re-score them:
+- `data/text_to_sql/eval/bird_doubtful.json` (in git) lists BIRD question ids we checked by hand, each with the reason and the date. BIRD's files are never edited.
+- The question **still counts as wrong**: 5 of 10 stays 5 of 10, so the number stays comparable with BIRD's leaderboard.
+- The Evaluation tab shows a **"BIRD answer doubtful"** badge and the reason on the question, a line under the score ("1 of the 5 wrong answers has a BIRD answer we believe is wrong"), and two more filters: **Scout's mistakes** (what's worth fixing) and **BIRD doubtful**.
+- Also fixed: "1 databases" now reads "1 database".
+- **BIRD #1482** ("which segment has the biggest and lowest percentage increase in consumption paid in EUR between 2012 and 2013") was added too: BIRD's SQL ignores "paid in EUR" (CZK customers use ~200× more, so its numbers are really about CZK), divides by 2012 though its own evidence says 2013, and returns three unnamed percentages instead of segment names. Scout followed the question and the evidence (EUR only, ÷ 2013, SME biggest, LAM lowest).
+
+**Tested:** 1 new test (a listed BIRD question is labelled, the score doesn't change, practice questions are never labelled). All 143 pass. Checked in the browser on the first-10 run.
+
+
+### Version-20: Know the Data Before the Question (Schema Catalog)
+
+**Problem:** BIRD #1484 ("How many more *discount* gas stations does the Czech Republic have than Slovakia?") was a real Scout mistake: the meaning said *"the data does not contain a specific 'discount' label"* and counted every station (3956 instead of 176). The column `gasstations.Segment` holds exactly five labels, one of them `'Discount'`, but all the LLM was told was `Segment TEXT -- chain segment`: BIRD's description file leaves the values empty. Scout had read those five values at startup (for the Version-4 checks) and never passed them on. What Scout knew about a database was scattered: descriptions in one place, a profile used only by the checks, foreign keys used only by table search, date ranges in the context, LLM summaries in another file, and it was all worked out again at every start.
+
+**The decision:** before the LLM writes a meaning, steps or SQL, Scout should know exactly what the data holds, and tell the LLM in the way that fits each column. Learned **from the data only, never from questions or answers**, which is also what BIRD allows (top systems profile the databases and index their values; what's not allowed is tuning on BIRD's questions or answers).
+
+#### 1. Offline onboarding, online answering
+
+- **Offline, once per database** (`schema_catalog.py`, `value_index.py`): read every table, profile every column, find links, index the values, and save it all to `data/catalogs/<database>-<id>/` (`catalog.json` + `values.sqlite`; generated, git-ignored, 180 MB for all of BIRD Mini-Dev). Rebuilt **only when the database file, its descriptions or its `schema.sql` change** (a fingerprint of their size and time). Scout does it by itself the first time it opens a database (and for an uploaded one); `python -m scripts.text_to_sql.onboard` (`--bird` for BIRD's 11) does it ahead of time. No LLM call. The practice database takes 0.1 s; BIRD's take 0.1 to 23 s each, once (European football is the slowest).
+- **Online, per question:** nothing is profiled; Scout reads the catalog and looks words up in the value index.
+
+#### 2. One schema catalog
+
+One record per database, the single place every part of Scout reads from:
+- **per table:** row count, primary key, links (declared, and inferred: see 3);
+- **per column:** type; **meaning** (the description file, else `schema.sql` comments, else an optional AI note, see 5); and its **profile**, chosen by its kind (see 3).
+
+What reads it: the **schema the LLM sees** (meaning, steps, SQL and the agent's `describe_table`) is now written from the catalog; the **checks** read their profiles from it; **table search** gets the inferred links too; and the **Tables view** lists every column with its kind and what's in it. The old profiler in `checks.py` was removed (one profiler, not two), and the date formats are shared. The LLM table summaries stay where they are (people review them), but are now tied to the schema *without* the profile, so a new profile or new rows don't make them out of date (all 10 practice summaries stayed valid).
+
+#### 3. A strategy for each kind of column
+
+| Kind | When | What the LLM is told |
+|---|---|---|
+| **key** | primary keys, linked columns, id-like names (`CustomerID`, `user_id`; not `paid`) | nothing more: values of an id say nothing |
+| **category** (low cardinality) | 20 or fewer different values | **every value**: `Segment TEXT -- chain segment; values: 'Other', 'Premium', 'Noname', 'Value for money', 'Discount'` |
+| **text, medium** | 21 to 1,000 values | how many, and the **most common** ones (`42 different values, most common: 'British Grand Prix', …`); if (nearly) every value is unique, like emails, **a few examples** instead |
+| **text, high** | more than 1,000 values | `more than 1,000 different values, e.g. …` (3 examples); the rest is found through the value index |
+| **long text** | 80+ characters on average | `free text`: never listed or indexed |
+| **number** | numeric values | the **range** (`from 1.5 to 300`); every value when there are 20 or fewer (ratings, flags) |
+| **date** | every value fits one format | **format and range**: `YYYY-MM-DD`, `MM/DD/YYYY` (both checked by the Version-4 checks), and, shown only, `YYYY-MM-DD HH:MM:SS`, `YYYYMM` (BIRD's `yearmonth.Date`: `format YYYYMM, from 201112 to 201311`), `HH:MM:SS` |
+| **empty** | no values | `always empty` |
+
+Also on any column: `mostly empty (76% missing)` when half or more is missing, and each table's row count. Dates' format and range now live in the schema, so the separate "Dates in the data" lines were dropped from the context (no duplicate). Values and examples are data: with `SHARE_ROWS_WITH_LLM` off they're left out (only counts, formats and ranges stay).
+
+**Relationships:** declared foreign keys are shown as `REFERENCES` (including keys that name only the table, as some BIRD databases do). Where none is declared, a link is **inferred from the data**: a column with the same name as another table's one-column primary key (or `<table>_id` pointing at its `id`), and at least 90% of a sample of its values exist there. Shown as `-- links to customers.CustomerID (not declared; matched by name and values)`; BIRD's `debit_card_specializing` declares none for `transactions_1k`, and three were found.
+
+#### 4. Profiling, catalog, value index
+
+- **Profiling** (offline): counts (rows, missing, distinct up to 1,001), values with how often each appears, ranges, formats, average length: all with plain SQL on the read-only database.
+- **Catalog:** the saved result (above).
+- **Value index** (`value_index.py`): every distinct short text value (up to 200 characters, 100,000 per column) of the category and text columns, in a small SQLite file with a full-text index. Ids, numbers, dates and free text are left out. BIRD: from 23 values (toxicology) to 679,264 (card games).
+  - **Before the LLM** (per question): the question's words are looked up, and the matching stored values go in the context, spelled exactly as stored: *"Values stored in the data that match words in the question: `gasstations.Segment = 'Discount'`"*; *"New York"* finds `customers.city = 'New York'` and `'new york'`. A value matches when at least half of its words are in the question (common words like "how", "many", "total" don't count); at most 3 per column and 12 in all, only from the tables picked for the question.
+  - **After the SQL** (the checks): `column = 'value'` is now checked for **any** indexed text column, not only those with 20 or fewer values; a value the column doesn't hold is rejected with the closest real ones: *"Description has no value 'discount'; similar values: 'Discount Germany', 'TIS PL Discount', …"*. Version-17's "back to the meaning" step works for these too.
+
+#### 5. AI notes for undescribed columns (optional, offline, not run yet)
+
+`python -m scripts.text_to_sql.onboard --describe` (`column_notes.py`) asks the LLM, one call per table, for one short sentence on each column that has **no description** (from its name, its table and its profile); it says how many calls first and asks. Saved next to the catalog in `column_notes.json` (kept when the catalog is rebuilt); shown marked **"(AI note)"**; a real description always wins; "unclear" answers and unknown columns are dropped. From the data only, so allowed for BIRD. **Not run**: it costs LLM calls, so it's for when the misses show undescribed columns matter.
+
+#### 6. Grouping by a shared name (found on the next practice run)
+
+The first practice run with the catalog scored **19/20**. Q9 ("the top 5 customers by total amount spent") merged **two different customers both called Ananya Kim** (customers 28 and 45): Scout grouped by `first_name, last_name` instead of by customer, so one "Ananya Kim" got both people's spending (752.92 instead of 677.93). The steps said "group by each customer's first and last name": our Version-17 rule *"no ids unless asked"* was meant for **what's shown**, but the LLM applied it to the **grouping** too.
+
+- **Prompts (steps and SQL):** *"Leaving ids out applies only to what's shown: still group and join by the id (different records can share a name)."*
+- **A check in code, from the catalog and the data:** a `GROUP BY` on a table's name-like text columns without its key is rejected when the data really has different records with the same values, with the reason and the fix, so the next try groups by the key: *"Grouping customers by first_name, last_name adds different customers together when they share those values (e.g. 'Ananya Kim' is more than one record). Group by customers.customer_id too; the result can still show only first_name, last_name."* It only fires when the grouped columns **nearly identify a record** (90%+ of rows have their own combination, like names): grouping by a category such as city or status is meant to add records up and is never flagged, nor is grouping by a key, a link (`orders.customer_id`), a number, a date or free text.
+- **Checked against the correct answers:** run over **all 500 BIRD correct SQLs and the 20 practice ones**, it flags **none** (a first version also flagged groupings by category and two BIRD answers grouping by a salary and by comment text; narrowed to name-like columns), and it still catches Q9's SQL.
+
+#### 7. The row estimate warns instead of refusing (for now)
+
+The next BIRD run (questions 1–10) scored **8 of 10**: the two misses are the two answers marked "BIRD answer doubtful", so Scout's own misses in the first 10 are now zero (Q3, Q6 and Q10 fixed). One of them, **#1482**, showed **Failed checks**: Scout's SQL was right (it follows the question and the evidence) but was never run, because Version-8's heavy-query limit **estimated** it would read about 1.9 million rows (the limit is 1 million). Run by hand, the same query took **0.03 seconds**: the estimate counts rows a query *might* touch, and SQLite's indexes and early stops make it far off on BIRD's bigger tables.
+
+So, for now (`BLOCK_ESTIMATED_READS = False` in `config.py`): a query over the estimate **runs anyway**, with a warning on the answer (*"The query was estimated to read about 1,916,410 rows; it ran within the time limit."*), and the **5-second time limit** is the real guard: a query that's really too slow is still stopped. Setting it back to `True` restores the refusal. The Failure Analyst agent's test queries keep the old limit. "Failed checks" still covers every check Scout runs on its own SQL (heavy query, a value not in the data, grouping by a shared name); the message under the question says which.
+
+#### 8. "Who" returns who, not the total it was ranked by
+
+The run after that scored **7 of 10**: #1482 now ran and gave Scout's answer (still counted wrong: doubtful), and **#1472** ("In 2012, who had the least consumption in LAM?") returned the right customer, 47273, plus its total consumption (0.74), where BIRD expects only the customer. The steps' last step said *"show the identifier … together with their total consumption"*. The same question was right in the two runs before: the LLM samples with some randomness, so on 10 questions one flip moves the score 10% (measure on more questions before trusting a change). Added to the steps and SQL prompts: *"When the question asks who, which or what, show only that: not the value used to rank or filter it (a total, a count, an average), unless the question asks for that too."* Prompt wording only.
+
+**For BIRD #1484:** Scout now sees `Segment … values: '…', 'Discount'`, and the context says `gasstations.Segment = 'Discount'`. Not yet checked with a run (no LLM calls were made).
+
+**Tested:** 9 new tests on a small database made in the test (each kind gets its profile; declared and inferred links; what the LLM sees, and what it doesn't with sharing off; onboarding once and again only after the file changes; question words finding stored values, only in the picked tables; a missing value caught in any text column with the closest spellings; AI notes filling only undescribed columns, marked; summaries staying valid) one on the practice database (the context names `customers.city = 'New York'`, dates are in the schema), and one for the grouping check (a shared name caught; grouping by the key, a link, a category or a WITH step left alone) and one for the row estimate (over it: the query runs with a warning; with blocking back on, it's refused). All 154 pass. All 11 BIRD databases onboarded (no LLM).
+
+
+### Version-21: BIRD Questions 11–30, One by One
+
+BIRD Mini-Dev questions 11–30 (all on `debit_card_specializing`) scored **8 of 20**. Each miss was re-run on the database (no LLM) and sorted: our scorer, BIRD's answer, or Scout. Fixed one at a time.
+
+#### 1. Scoring every row, not the first 200
+
+**#1506** (*"list the product descriptions of the transactions … in the Czech Republic"*) was scored wrong, but Scout was right: its SQL (no `DISTINCT`) returns 933 rows holding all 21 products, the same set as BIRD's answer, and BIRD compares rows as a set. The app keeps only the **first 200 rows** of an answer (`MAX_RESULT_ROWS`), and the scorer compared those: they held only 4 of the 21 products. BIRD's correct SQL was cut at 200 rows the same way (#1500's has 976).
+
+**Fix:** the scorer now runs both Scout's SQL and BIRD's again **in full** (`database.run_all`, up to 1,000,000 rows; more is an error, never a silent cut) and compares the whole results, as BIRD's own evaluation does. The app still shows 200 rows. If Scout's SQL can't be run again whole (e.g. over the time limit), the kept rows are used and the log says so. Questions 11–30 are really **9 of 20**. One new test (a 302-row answer whose first 200 rows hold one value); all 155 pass.
+
+#### 2. "Is it true…? If so, how many?" returns just the value
+
+**#1486** (*"Is it true that more SMEs pay in Czech koruna than in euros? If so, how many more?"*) returned `'true', 23505`; BIRD expects `23505`. The number was right, but Scout added a yes/no column, and its SQL would have returned `0` if the answer were "no" (`ELSE 0`), hiding the real difference.
+
+The value answers the yes/no by itself: a positive difference means yes, a negative one means no (and by how much), 0 means equal or none. Added to the steps and SQL prompts: *"When the question asks yes/no and then asks for a value (Is it true…? If so, how many / how much / by what percent?), return only that value. Compute it in the direction the question states (the first thing minus the second, or as the hint's formula says) and keep it as computed, even if negative or 0: never replace it with 0, true/false or a message."*
+
+| Question | Returned | When the answer is "no" |
+|---|---|---|
+| More SMEs pay in CZK than EUR? How many more? | CZK − EUR | negative |
+| Did sales go up from 2012 to 2013? By how much? | 2013 − 2012 | negative |
+| Did consumption drop from 2012 to 2013? By what percent? | (2012 − 2013) / 2012 × 100 | negative |
+| Has any order been cancelled? If so, how many? | the count | 0 |
+
+A plain yes/no question with no value asked ("Is store A open on Sundays?") is unchanged. Prompt wording only; not yet checked with a run.
+
+#### 3. Run one question again, from its issue or the Accuracy check
+
+To see whether a fix worked, there was no way to ask one question again: only a whole run (from–to). Each eval issue (**Evaluation → Issues**) now has **Run this question again**: Scout answers that one question as it is now, exactly as in a run (first meaning, steps as written, BIRD's hint), and the issue shows the result: **Right** or what went wrong, Scout's new SQL, and its rows next to the correct ones when wrong, with the LLM calls, cost and time. Earlier checks of the same question are listed under it. The same button is under **every question of the Accuracy check** (open a question, right or wrong), so a question can be tried again straight from the score.
+
+A check is **not a run**: it's saved apart (`data/text_to_sql/eval/runs/checks/`), so the Evaluation tab's score, the run list and BIRD's prediction files never change, and a wrong answer doesn't log another issue. It's the honest way to test a fix on one question; the score only moves when a real run is made. One at a time: while a run (or another check) is going, the button waits. `POST /api/eval/checks` (suite, question_id) starts one; `GET /api/eval/checks?question_id=` returns its checks, newest first. One new test; all 156 pass.
+
+#### 4. BIRD Mini-Dev, corrected (a second BIRD suite)
+
+Many of our "misses" were BIRD's own answers being wrong. A paper suggested by a UW–Madison CS professor confirms this at scale: **"Pervasive Annotation Errors Break Text-to-SQL Benchmarks and Leaderboards"** (Jin, Choi, Zhu, Kang, UIUC, PVLDB 19) found annotation errors in **52.8% of BIRD Mini-Dev** and showed that fixing them moves leaderboard scores by −7% to +31% and ranks by up to 9 places. They release corrected Mini-Dev files ([github.com/uiuc-kang-lab/text_to_sql_benchmarks](https://github.com/uiuc-kang-lab/text_to_sql_benchmarks), CC-BY-SA-4.0).
+
+**What their files are:** the same Mini-Dev questions (498: two duplicates removed), each with BIRD's original next to the fix (`original_SQL`, `original_question`, `original_evidence`). Two versions: `arcwise_plat_sql_only_with_diff.json` and `arcwise_plat_full_with_diff.json`. Even the "SQL only" one rewrites some questions (#1500 now asks about August 2012 instead of September 2013, which the data doesn't have), so old answers can't simply be re-scored against it: Scout has to answer the corrected questions. The full version also fixes **10 column descriptions** (e.g. `satscores.rtype` was "unuseful"; now "'D' means district, 'S' means school").
+
+**What we added:** a third test suite, **BIRD Mini-Dev, corrected** (`bird_corrected`), using the **full** version (the corrected questions, hints and correct SQL), picked like any suite in **Run an evaluation**. BIRD's own files are never changed and the official **BIRD Mini-Dev** suite stays as it was, so both scores can be reported side by side (the paper recommends not trusting the official one alone).
+
+- Files in `data/benchmarks/bird/corrected/` (git-ignored, like BIRD): their two JSON files and LICENSE, `schemas/` (their fixed descriptions), and `dev_databases/<db>/`, which **links** BIRD's own `.sqlite` file with the fixed `database_description/` (no copy of the databases).
+- Difficulty comes from BIRD's file (theirs has none); question ids are BIRD's.
+- Each suite gets its own Scout per database (both suites have a `debit_card_specializing`, with different descriptions), and its own catalog (`catalog_dir` no longer merges a linked file with its target). All 11 corrected databases onboarded (no LLM).
+- Like BIRD, it's a benchmark: issues can be investigated, but fixes found from its correct answers are never applied. The "BIRD answer doubtful" labels belong to the official suite only.
+
+**Our first 30 questions against their fixes** (Scout's saved SQL run against their correct SQL, a rough look only, since some questions were reworded): their fixes agree with what we found by hand for **#1481** (our "doubtful"), **#1505** and **#1525** (count customers, not rows) and **#1531**; #1526, #1529, #1490 and #1482 are still disputed or reworded; and **#1473**, which Scout got right under BIRD, is now wrong: they changed its hint to the average of each customer's total. The true corrected score needs a run of the new suite. One new test; all 157 pass.
+
+The other paper suggested, **BEAVER** (Chen et al., MIT/AWS/TUM: an enterprise text-to-SQL benchmark from real data warehouses, ~78 tables per database, ~4 joins per query, where GPT-4o scored near 0%), is the harder target for later: its main failures are picking the wrong column, unstated filters and missing join tables.
+
+#### 5. A broken quote no longer stops the whole run
+
+The first run of the corrected suite (questions 1–50) **stopped at 31** with *"The run stopped on an error: Error tokenizing ' 'Women's Soccer'"*. On question 32 (#1317, *"…who attended the event "Women's Soccer"…"*) Scout wrote `WHERE event_name = 'Women's Soccer'`: the apostrophe ends the string early. That's an ordinary bad try, which SQLite rejects and Scout retries. But our safety check reads the SQL with the sqlglot parser first, and on an unclosed quote sqlglot raises **`TokenError`**, while our code only caught **`ParseError`** (a sibling class). The error escaped Scout, and the eval runner treated it as fatal for the whole run.
+
+- **Every place that parses SQL** (the safety check, the checks, table detection, the comparison of tries) now catches sqlglot's base `SqlglotError`, which covers both. An unreadable query still can't write: the safety check falls back to looking for write keywords outside quotes. The same SQL now goes through as a normal rejected try: SQLite says `near "s": syntax error`, and the value check adds *"event_name has no value 'Women'; similar values: "Women's Soccer""*, so the next try can fix it.
+- **One question's crash fails that question, not the run:** an unexpected error inside Scout is recorded as **No answer** with the error, logged as an issue, and the run carries on.
+
+A run stopped this way can be **resumed** from the Evaluation tab (it carries on from question 32). Two new tests; all 159 pass.
+
+#### 6. First result on corrected BIRD: 42 of 50
+
+After the fix above, questions **1–50 of BIRD Mini-Dev, corrected** (2 databases: `debit_card_specializing` and `student_club`) scored **42 of 50 (84%)**: simple 21/25, moderate 18/19, challenging 3/6; 279 LLM calls (5.6 per question), $0.062 in all, about 8.5 minutes, with `openai/gpt-oss-120b` via OpenRouter.
+
+![BIRD Mini-Dev, corrected, questions 1–50: 42 of 50 right](data/screenshorts/bird-corrected-first-50.png)
+
+For comparison, on the official BIRD answers the first 30 scored about 17 of 30 (8/10 on 1–10, 9/20 on 11–30 once scored on every row). Most of that gap is BIRD's annotation errors, not Scout. The scores aren't directly comparable: different numbers of questions, some questions reworded, and the prompts changed between runs.
+
+The 8 misses, to go through one by one next: #1482, #1486, #1493, #1498, #1524, #1526 (`debit_card_specializing`, wrong rows), #1317 (`student_club`: value not in data, the 'Women's Soccer' question) and #1339 (`student_club`, wrong rows).
 
 ---
 
