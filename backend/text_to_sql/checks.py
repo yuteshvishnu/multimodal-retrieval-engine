@@ -88,10 +88,11 @@ def check_sql(sql: str, tables: List[dict], today: date, values=None) -> Tuple[L
         errors.append("Dividing cents by the integer 100 drops the cents in SQLite; divide by 100.0 instead.")
 
     # column = 'text' / column != 'text' / column IN ('a', 'b')
-    comparisons = [(m.group(1), m.group(2), [m.group(3)]) for m in re.finditer(
-        r"\b(\w+)\s*(=|!=|<>|<=|>=|<|>)\s*'([^']*)'", sql)]
-    comparisons += [(m.group(1), "IN", re.findall(r"'([^']*)'", m.group(2))) for m in re.finditer(
-        r"\b(\w+)\s+(?:NOT\s+)?IN\s*\(([^)]*)\)", sql, re.IGNORECASE)]
+    # a text value may hold a doubled apostrophe ('O''Brien' means O'Brien)
+    comparisons = [(m.group(1), m.group(2), [m.group(3).replace("''", "'")]) for m in re.finditer(
+        r"\b(\w+)\s*(=|!=|<>|<=|>=|<|>)\s*'((?:[^']|'')*)'", sql)]
+    comparisons += [(m.group(1), "IN", [v.replace("''", "'") for v in re.findall(r"'((?:[^']|'')*)'", m.group(2))])
+                    for m in re.finditer(r"\b(\w+)\s+(?:NOT\s+)?IN\s*\(((?:[^)']|'(?:[^']|'')*')*)\)", sql, re.IGNORECASE)]
 
     for column, op, literals in comparisons:
         for p in profiles.get(column.lower(), []):

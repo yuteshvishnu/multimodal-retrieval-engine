@@ -44,6 +44,9 @@ Rexie answers questions **only from our own data**. It's one app with two produc
   - [Version-19: Getting Better on BIRD](#version-19-getting-better-on-bird)
   - [Version-20: Know the Data Before the Question (Schema Catalog)](#version-20-know-the-data-before-the-question-schema-catalog)
   - [Version-21: BIRD Questions 11–30, One by One](#version-21-bird-questions-1130-one-by-one)
+  - [Version-22: Comparing Flows (Ask Me Anything)](#version-22-comparing-flows-ask-me-anything)
+  - [Version-23: SQLite Refresher](#version-23-sqlite-refresher)
+  - [Version-24: Adaptive + English Program](#version-24-adaptive--english-program)
 - [The App (UI)](#the-app-ui)
 - [Dashboard (LLM Usage and Cost)](#dashboard-llm-usage-and-cost)
 - [Fixes](#fixes)
@@ -194,7 +197,22 @@ multimodal-retrieval-engine/
 ├── data/
 │   ├── benchmarks/bird/     # Version-18: BIRD Mini-Dev as downloaded (git-ignored; outside text_to_sql/ on purpose)
 │   ├── catalogs/            # Version-20: one catalog + value index per database (generated, git-ignored)
-│   ├── rag/                 # Scribe: documents (raw_docs), built index, eval set
+│   ├── rag/                 # Scribe: documents (raw_docs), built index, eval seHere's a cleaner version:
+
+**Subject:** Meeting Schedule – Thursday, Nov 12
+
+Hi everyone,
+
+Thanks for sharing your availability. I've booked Room 3675 for Thursday, November 12th. Please arrive with your teammates at the time listed for your team in this email.
+
+**Teams 17 and 22:** To work around your class schedules, your slots are 1:15–1:45 PM and 1:45–2:15 PM. We'll meet at Hello World instead of Room 3675.
+
+Please pass this along to your teammates.
+
+Best,
+Yutesh
+
+Your original didn't say which of Teams 17 and 22 gets which slot. If you know, you could write "Team 17: 1:15–1:45 PM, Team 22: 1:45–2:15 PM" so nobody is confused.kt
 │   └── text_to_sql/         # Scout: one folder per database
 │       ├── retail_store/    #   practice DB, descriptions, 20 questions + answers
 │       ├── sql_errors.json  #   Version-9: known SQLite errors and their fixes (edit by hand)
@@ -495,6 +513,7 @@ Each version fixed a problem the previous one exposed.
 | **Version-19:** Better on BIRD | The 5 misses in BIRD's first 10, one by one | 1. The LLM's wording of a meaning never blocks a question (a warning instead); only the final SQL check blocks. 2. A value the hint defines ("the month is the 5th–6th characters") is returned in that form. 3. BIRD answers we checked by hand and believe are wrong are labelled "BIRD answer doubtful" (still counted as wrong) |
 | **Version-20:** Schema catalog | Scout never saw what's in a column (BIRD #1484: `Segment` holds 'Discount', but Scout was told only "chain segment") | Offline onboarding builds one catalog per database (every column profiled by its kind, links declared and inferred) plus a value index; online, the LLM sees each column's meaning and contents, the question's words are matched to stored values, and a value missing from any text column is caught |
 | **Version-21:** BIRD 11–30 | BIRD questions 11–30 scored 8/20; the 12 misses, one by one | 1. Answers are scored on every row, not the first 200 the app keeps (#1506 was right but scored wrong). 2. "Is it true…? If so, how many?" returns only the value (#1486). 3. **Run this question again** from its issue or the Accuracy check, to see if a fix worked. 4. **BIRD Mini-Dev, corrected**: a second suite with BIRD's annotation errors fixed (UIUC Kang lab). 5. A broken quote in Scout's SQL no longer stops a run. Corrected BIRD 1–50: **42/50 (84%)** |
+| **Version-22:** Comparing flows | Scout's 3 SQL tries come from one prompt, so they copy each other's mistakes (6 of 8 wrong answers had "high" confidence), and a new way of answering needs a fair side-by-side test | Evaluation → **Comparison**: one ring per flow on exactly the same questions (any From–To range), and one click to run them in turn. **Full** follows the Ask Me Anything paper (4 prompt chains, 8 calls, worked examples, majority vote); weak supervision and **Adaptive** are replayed from its saved answers with no LLM calls. Every chain's answer is saved. Apostrophe bug fixed. First comparison, corrected BIRD 1–50, on an earlier 3-route Full: Original 42, Full 40, Adaptive 41 at half the cost |
 
 ---
 
@@ -1259,6 +1278,163 @@ After the fix above, questions **1–50 of BIRD Mini-Dev, corrected** (2 databas
 For comparison, on the official BIRD answers the first 30 scored about 17 of 30 (8/10 on 1–10, 9/20 on 11–30 once scored on every row). Most of that gap is BIRD's annotation errors, not Scout. The scores aren't directly comparable: different numbers of questions, some questions reworded, and the prompts changed between runs.
 
 The 8 misses, to go through one by one next: #1482, #1486, #1493, #1498, #1524, #1526 (`debit_card_specializing`, wrong rows), #1317 (`student_club`: value not in data, the 'Women's Soccer' question) and #1339 (`student_club`, wrong rows).
+
+### Version-22: Comparing Flows (Ask Me Anything)
+
+**Why:** in the corrected BIRD run (42/50), **6 of the 8 wrong answers had "high" confidence**: all three SQL tries agreed, and were wrong. They come from the same prompt, steps and meaning, so they make the same mistake. The paper **"Ask Me Anything: A simple strategy for prompting language models"** (Arora, Narayan, … Frederic Sala, Christopher Ré; Stanford and UW–Madison) shows this for prompting in general: several prompts asking the *same task in different ways* make *different* mistakes, and **weak supervision** combines their answers without any answer key.
+
+#### 1. Comparing flows on the same questions
+
+- **Run an evaluation → Flow:** every run records its flow (older runs count as Original).
+- **Evaluation → Comparison:** pick a suite and a range (**From and To**, or First 50 / 100 / 250 / All). One **ring per flow**, each from its newest run that answered **every** question of the range, so rings always cover the same questions. Under each: right of total, LLM calls per question, cost, wrong with high confidence, how often "high" was right, and how often a right answer was there on the misses. Below: the questions where the flows differ.
+- **Run comparison:** one click runs the chosen flows **one after another** (in parallel they'd hit the provider's rate limits), with the same live card as the Accuracy check. **Reuse existing runs** skips a flow that already answered those questions. Stop and Resume work, also after a server restart.
+
+#### 2. First comparison: a 3-route version, corrected BIRD 1–50
+
+![Comparison of three flows on corrected BIRD questions 1–50: Original 84%, Full 80%, Adaptive 82%](data/screenshorts/first-50-comp.png)
+
+| | Original | Full (3 routes) | Adaptive (2–3 routes) |
+|---|---|---|---|
+| Right | 42/50 | 40/50 | 41/50 |
+| LLM calls per question | 5.0* | 7.0 | 3.1 |
+| Cost | $0.053* | $0.061 | $0.029 |
+| "High" confidence was right | 41/47 | 38/47 | 40/48 |
+
+*Without #1317, whose 34 calls probably include attempts from before the crash fix. With it, 5.6 calls and $0.062.
+
+**What it showed:** the flows differ on only 4 of 50 questions, too few to call a winner. Adaptive's saving is real. Different routes did **not** reduce confident mistakes. Seven questions were missed by all three, 6 of them with the same wrong answer: the routes share the same model, schema descriptions and SQL rules, so changing only the wording can't fix those. Full lost two questions to a side effect of ours (rewriting the meaning changed the output format, e.g. "combine the names"). And the weak-supervision vote hadn't really been tested: its learned weights still let any two routes beat the third, the same as a majority.
+
+#### 3. Full, rebuilt to follow the paper more closely
+
+Checked against the paper's appendix. A **prompt chain** has two calls, as the paper's `question()` and `answer()`, and its own **worked examples**:
+
+| Chain | The question rewritten as… (call 1) | SQL written after… (call 2) |
+|---|---|---|
+| **direct** | plain words | nothing: straight away |
+| **explore** | the exact tables, columns and stored values | notes on what to use |
+| **plan** | which values are asked for, and how each is computed | numbered steps |
+| **shape** | the hint's definitions first | saying what one row of the result is |
+
+**4 chains, 8 calls** per question (the paper uses 3–6; 6 chains would be 12 calls, overkill). The meaning is never forced into a different reading, which would make an answer wrong on purpose, and it says only what to compute, never how to show it. The worked examples are about the practice retail store, never a benchmark's questions; a test runs each of them on the practice database. Every chain passes **the same checks** as the Original flow and is run; one that fails abstains (no retry).
+
+**How it answers:** chains returning the same rows, as a set, as BIRD compares them, give one answer. The live answer is a **majority vote**, the paper's own choice for open-ended answers (it reports majority vote for its QA tasks, since "using WS is complex with the open-ended output space"), and ties go to the earliest chain.
+
+**Replayed from the saved chains, with no LLM calls** (each chain's SQL, meaning and first rows are saved, and scoring marks whether each was right):
+
+| Ring | What it does |
+|---|---|
+| **Full + weak supervision** | Our extension of the paper. After all the answers are in, as the paper does, each chain's accuracy is learned **only from how often the chains agree**: agree(i, j) ≈ acc(i) × acc(j), so acc(i) = √(agree(i,j) × agree(i,k) / agree(j,k)) (the "triplet" method, Fu, Chen, **Sala** et al., 2020). A vote weighs log(acc / (1 − acc)). With 4 votes a 2-vs-2 tie gives the weights a real job. Grouping chains by their rows is what makes this possible for SQL. |
+| **Adaptive** | Our idea, not the paper's: the first 2 chains agree, stop (4 calls); otherwise all 4 and a majority (8 calls). Replayed, so it's judged on exactly the same answers as Full; its cost is estimated from Full's. |
+| **With only 3 chains** | Shown on Full's ring, as is one chain alone on average. |
+
+The Original flow's tries are saved the same way, so each ring can show whether **a right answer was there** on the misses: if so, picking is the problem; if not, the tries are.
+
+**Different from the paper, and said plainly:** the paper learns which prompts copy each other (Varma, Sala et al., 2019); the triplet method doesn't, and with 4 chains it wouldn't be reliable. The paper's prompts ask yes/no, Wh-, multiple-choice and fill-in-the-blank questions about a passage; ours are adapted to SQL. The paper tests 14 models one at a time and never mixes them in a vote; we use one model.
+
+#### 4. Other fixes in this version
+
+- **Apostrophes:** Scout wrote `'Women's Soccer'`, which breaks the SQL, on every flow; the retry didn't fix it. The SQL prompt now says to write `'O''Brien'`. The value check didn't understand a doubled apostrophe either: it would have rejected the correct SQL as value `'Women'`. Fixed, and a real misspelling is still caught.
+- **One definition of "high confidence", in every flow:** every try or chain that answered agrees, and at least 2 answered.
+- **Live view in Comparison:** the queue learned a run's id only when the run ended, so nothing showed while it ran. The id is now saved as soon as the run starts.
+- **Each question's details** (Accuracy check) list every try or chain: right or wrong, its answer, meaning and SQL.
+
+Where: `backend/text_to_sql/flows.py` (the chains and the votes), `eval_runner.py` (`compare`, `start_comparison`, the saved chains), `eval_api.py`, `CompareView.jsx`. New tests cover the 4 chains, abstaining, the same-rows rule, the confidence rule, ties, learned weights, Adaptive's replay, the worked examples, apostrophes, ranges and saved chains; all 174 pass (run six times, after fixing a flaky test). Checked in the browser with no LLM calls. **The 4-chain Full hasn't had a real run yet**: Run comparison on questions 51–150 is its first. Its estimate says about 82 minutes, but the first comparison ran closer to 10 seconds per question, so expect about 30–40.
+
+**Adaptive can also run on its own.** So you can compare Original and Adaptive without paying for Full: tick any flows in Run comparison (Adaptive is on by default, Full isn't). Live, it runs chains 1 and 2, and chains 3 and 4 only if those two don't agree on the same rows, the same rule as the replay. If Full is ticked, Adaptive isn't run separately, since Full's answers already give its result. A ring uses Adaptive's own run if it's newer than Full's, and says which it is.
+
+**Second comparison, questions 101–200:** Original 92, live Adaptive 90, with Adaptive at 4.4 calls per question vs 5.2, $0.145 vs $0.195, 6 minutes vs 14. They differ on only 6 questions (Original 4, Adaptive 2), so accuracy is effectively tied. Over questions 50–200: Adaptive 137 (its 50–100 score replayed from Full), Original 135, of 151. Most misses aren't a voting problem: a right answer was among the tries on only 3 of Original's 16 misses and 4 of Adaptive's 14. These are one run each.
+
+**Two fixes to Adaptive from those misses.** Both are general rules, but they were noticed by reading these questions, so they should be measured on **new questions (201–300)**, not on 101–200.
+
+- **It doesn't stop early on an empty answer.** Two chains agreeing on no rows (or only NULLs) is weak evidence, as in #192: they run chains 3 and 4 instead. So that this can change the answer, a tie now goes to an answer with data before the earliest chain (in every vote; it only matters when one side is empty). The replay follows these rules too, using each chain's saved rows.
+- **Rejected SQL gets one retry, live only, told why.** In #1265, all 4 chains were rejected for a value the data doesn't hold, while Original's retry fixed it. Most calls: 12. **Full stays as in the paper, with no retry,** so a replayed Adaptive has none; a ring says whether it's replayed or live.
+
+**Questions 200–300:** Adaptive 88, Original 82 of 101; 4.2 calls per question vs 5.0, $0.097 vs $0.140. Neither Adaptive fix was triggered (0 retries, no empty-answer escalations), so they didn't cause this. Over questions 50–300, counting question 200 once: Adaptive 225, Original 217, of 251; Adaptive won 15 of the 22 questions where they differ, not yet proof; about 28% cheaper.
+
+**Choosing the model.** Run an evaluation and Comparison each have a **Model** choice, smallest to largest by size (not by measured quality):
+
+| Model | Host | $ per million tokens, in / out |
+|---|---|---|
+| Llama 3.1 8B | Groq | 0.05 / 0.08 |
+| GPT-OSS 20B | Groq | 0.075 / 0.30 |
+| Gemma 4 31B | Crusoe | 0.14 / 0.40 |
+| Llama 3.3 70B | Groq | 0.59 / 0.79 |
+| GPT-OSS 120B (default) | Crusoe | 0.05 / 0.25 |
+
+All are on the two hosts already allowed, checked against OpenRouter's public list on 2026-11-05, so no new host is involved. Each model gets its own rings: a run on one never replaces another's, and Reuse only reuses that model's runs. Earlier runs stay under GPT-OSS 120B. Each model gets its own Scouts, so the app's Scout never changes model. A price estimate uses the chosen model. **Only GPT-OSS 120B has been run through these flows**; the others need a short check first. "Run this question again" still uses the default model.
+
+**Scoring is now exact, as BIRD's own scorer is** (`set(predicted) == set(gold)` in BIRD's `evaluation_ex.py`). It used to round decimals to 4 places first, which is more lenient. Re-checking the 442 saved answers marked right on corrected BIRD, questions 50–300, exact comparison changed none. Only scoring changed: chains still round decimals when deciding whether they agree, so tiny float differences don't split a vote. BIRD's actual scoring script hasn't been run on Scout's answers yet; that's the final check for an official number.
+
+#### 5. Mixed + weak supervision (our extension, not the paper's)
+
+The paper tests models one at a time and never mixes them in a vote. Our finding was that mistakes come partly from sharing one model, so this flow removes that: **3 models from 3 labs answer each question once** (GPT-OSS 120B, DeepSeek V4.1 Flash, Nemotron 3.5 Super, all on Crusoe; OpenRouter only). 6 calls. GLM 5.3 Flash was a fourth until its first run: on one question it thought for 131,072 tokens and 460 seconds on a single rewrite, which held the whole question up.
+
+For each question, 3 of the 4 rewrite styles and 3 of the 4 ways of writing SQL are **shuffled** among the models, with no repeats, so no model is tied to a style. The shuffle comes from the question's text, so it's repeatable, and it also sets the tie order, so no model gets an edge. Chains returning the same rows count as one answer; one that fails drops out, with no retry.
+
+**The ring** shows the weak-supervision score: after the run, each **model's** trust is learned from how often the models agreed, never from correct answers. Beside it: the plain majority's score, each model alone, and whether a right answer was there on the misses. The run's live score, its Accuracy check and its issues use the majority vote, because trust can only be learned once all the answers are in. **Only the first 8 questions have been run, with the 4-model version, stopped because of GLM;** that run can't be resumed with 3 models. There's still no token limit per call.
+
+**Not changed on purpose:** the misleading `Price` description and "monthly" questions: those were found by reading BIRD's answers, so fixing them for a benchmark run would be cheating.
+
+### Version-23: SQLite Refresher
+
+**The idea being tested:** Scout's SQL relies on what the model learned in training. Does reminding it of what every SQLite command does, with examples, give better SQL?
+
+**What changed:** [`sqlite_refresher.md`](backend/text_to_sql/sqlite_refresher.md) lists the read commands Scout can use, what each does, single examples and combined ones. It's added to the system prompt **only on calls that write SQL**, including retries, in every flow and in the app; the meaning and steps calls don't get it. Set `SQL_REFRESHER=0` in `.env` to turn it off. Each new run records `sql_refresher`, so runs with and without it can be told apart.
+
+**Fair by design:** its examples use a made-up shop, with nothing taken from BIRD. A test runs every example on a real SQLite database and through Scout's read-only check. Its combined examples do show common patterns, such as ties and customers with no orders, so a gain can't separate new knowledge from a useful reminder.
+
+**Saved answers:** all saved runs, BIRD prediction files and comparisons moved to `data/text_to_sql/eval/runs_archive/before-refresher-20261106-171645/` (not deleted), so a new run reuses nothing. The baseline is there: Mixed on official BIRD 1–100, **76/100**, run `20261106-005357-6721`. The SQLite error rules in `sql_errors.json` stay, because they were also on for the baseline and removing them would change two things at once. The refresher run was stopped after 35 of 100 questions: 24 right against the baseline's 25, none fixed, one broken, at about 44 s per question against 31 s. It's now **off by default** (`SQL_REFRESHER=1` turns it on), so this is a partial result only.
+
+### Version-24: Adaptive + English Program
+
+**The idea being tested:** rely less on the model for SQL. The model still reads the question and writes a sentence, but the deterministic program [`english2sqlite.py`](backend/english_to_sql/english2sqlite.py) writes the SQL, following [`FORMAT.md`](backend/english_to_sql/FORMAT.md).
+
+**What changed:** a new flow, **Adaptive + English program**, in Evaluation and Comparison. It follows Adaptive: 2 chains, the other 2 only if they disagree or return no data, and 4 to 12 calls. Each chain rewrites the question, writes one sentence, and the program compiles it. The SQL then passes Scout's usual checks. A sentence the program rejects gets the one retry, told why. Every chain's sentence is saved and shown beside its SQL.
+
+**Fair by design:** the chains use the same styles and the same retail-store examples as Adaptive, including `LIMIT 1` for "the most", so only the SQL writer changes. The model gets only the format's query rules. The format's `raw` shortcuts and shell commands are blocked, and the flow accepts only one read query. Function calls such as `strftime(...)` remain allowed, as the format passes them through. The refresher isn't sent to this flow.
+
+**First run, corrected BIRD 1–30:** 22 of 30, with 40 of 94 chains rejected even after a retry, mostly for putting a condition or source inside a total. #1471 returned 0 because SQLite's `1 / 2` is 0. So the format now accepts `(count of rows where c)` and `(sum of x from t where c)`, and division always gives a decimal.
+
+**Rerun of 1–30 with those changes:** 24 of 30, with 16 of 90 chains rejected. The misses came from reading the question or data, the answer's shape, and one doubtful key, not from the program's translation.
+
+**Vote change, in every flow that votes between chains (Full, Adaptive, Mixed, English; Original keeps its own vote):** an empty answer can only win when no chain found data, and it still lowers the confidence. Replayed on all saved runs with votes, with no LLM calls, it fixed 4 answers and broke 1. The one broken is #1526 on the official key, whose right answer is itself empty; the same rule fixes #1526 on the corrected key. The latest 1–30 run goes from 24 to 25 in that replay.
+
+**Answer rule: "respectively".** In #1482, every model found the right percentages for SME, LAM and KAM, but returned one labelled row per segment, while the question says "respectively" and the key wants one row of three values in that order. The answer rules shared by every flow, including the English one, now say: when a question lists items and says respectively, return one row with one value per item, as separate columns in the order listed, without labels. It's a benchmark convention found on a studied question, so it needs checking on unseen ones.
+
+**Rule: totals before the highest or lowest.** In #1498 ("the highest monthly consumption in 2012"), every flow took the largest single record instead of the largest monthly total. Every step that decides what to compute (the meaning, Original's meanings and steps, the SQL and the English sentence) now says: for the highest or lowest value per month, year, customer, category or similar, when several rows make up one unit, total each unit first and take the highest or lowest of those totals; use MAX or MIN on single rows only when each row already is one unit. Found on a studied question, so it needs checking on unseen ones.
+
+**Two more general rules.** Neither names a question or database.
+- **Which metric:** before choosing tables, joins and aggregates, decide whether the measure is a count of entities, a count of transactions, a money amount or another metric, from the question, its hint and the schema's descriptions, with a hint that defines a calculation taking precedence over ambiguous wording. When a question compares how many entities belong to different categories, count them on their own table with conditional aggregation, rather than joining transaction tables and adding up amounts, unless the question is about money spent or paid. Join other tables only when the metric needs them. A suggested example ("how much more SMEs pay in CZK than EUR") was left out, because it's #1486's own wording, and both keys count customers there although "pay" usually means money. So this rule doesn't change #1486, which stays a doubtful key.
+- **Parts of a field:** when a question asks for a part of a field, such as the month of a date, use that part the same way in the grouping and the result, filter to the period asked, and return that part rather than the full field, unless the full field is needed to tell results apart.
+
+Both rules are in the meaning, Original's meanings and steps, the SQL and the English sentence. The date-part rule was first left out of the meaning steps, and #1480 ("the peak month") showed why it can't be: the meaning said "the month (YYYYMM)", the SQL step follows the meaning exactly, and every chain returned `201304` instead of `04`. All need checking on unseen questions.
+
+**Measure check (code, no AI).** Prompt rules say to work out the measure first; this checks the result. Each chain's meaning step now also names the measure: *entity count*, *transaction count*, *money* or *other*. [`measure_check.py`](backend/text_to_sql/measure_check.py) reads the SQL's totals with the parser and flags only clear mismatches: a count is asked for but no total counts (they add up values), or money is asked for but every total only counts. `COUNT`, and `SUM` over a condition or over a `CASE` giving only 0, 1 or -1, count. A flagged chain gets one retry, told why, where the flow has retries (Adaptive, English); otherwise, or if the retry fails, it keeps its answer with a warning. It never removes an answer. Original isn't covered: its meaning comes from the app's own meaning step.
+
+**Measured on saved SQL, before any run:** using a label taken from each answer key (all counts, or no counts), it flagged 10 wrong chains, all on #1486, and 4 right ones, all on #897. That question asks for names and a maximum, which the meaning step should call *other*, so those 4 come from the stand-in label. Live, the model writes the label, which can be wrong too. So the check is cheap and narrow: no extra calls unless it flags, and on saved runs it only ever caught #1486.
+
+**Rule: the right denominator for an average per entity.** When a question asks for an average per entity (per event, per customer), divide by the number of that entity, and don't treat an intermediate table as the same thing (budget lines aren't events) unless the schema's keys or the data show they match one to one. It's in the meaning, Original's meanings and steps, the SQL and the English sentence. This kind of miss is labelled `ENTITY_DENOMINATOR_AMBIGUITY`: when the two denominators give different answers, as on #1339 (per event vs per budget line), it's worth checking whether the key itself is ambiguous before teaching Scout to prefer either one. There's no code check for it yet.
+
+**Value grounding.** When a question names a record by a value ("the customer who paid 634.8"), the prompts now say to work out which column or expression holds that value first, preferring a stored column over a calculation, and to check that the condition picks out the intended record. A suggested line, "don't assume payment means Amount × Price", was left out, because it comes from what #1524 and #1526's keys use. Two code checks, in the same semantic checks:
+- `VALUE_GROUNDING`: no rows (or only NULLs) came back, the SQL matches a decimal number from the question through an expression or column where the data doesn't have it, and the data has it in another column. The message names that column and its row count. It looks only at the tables in the SQL, so the answer key is never involved.
+- `NUMERIC_TYPE`: a division of two whole numbers (counts, sums of 0/1, integers), which SQLite rounds down.
+
+Replayed on every saved chain answer: `VALUE_GROUNDING` flagged 28 wrong answers on #1524 and #1526, plus 4 marked right on #1526's **official** key, whose right answer is itself empty. `NUMERIC_TYPE` flagged none. Not done: a check that a `LIMIT 1` lookup matches only one record (`ENTITY_LOOKUP_AMBIGUITY`), and adding value matches to Prepare before the SQL is written.
+
+**Structured meaning and semantic checks.** Rules in prompts aren't checked: #1480 and #1498 stayed wrong after their rules were added. So each chain's meaning step now also returns a small spec of what the answer must be: the measure, the **grain** it totals or ranks by, the **extreme** (highest, lowest or none), the **date part** (year or month) and **values per row** when the question fixes it. Code adds "month" when the question plainly asks which month. The spec goes to the SQL or sentence step as plain lines, and after the SQL runs, [`semantic_check.py`](backend/text_to_sql/semantic_check.py) compares it with the SQL and its rows, flagging only clear cases:
+
+| Code | Flags | Example |
+|---|---|---|
+| `METRIC_MISMATCH` | a count is asked for but the SQL adds up values, or the reverse | #1486 |
+| `OUTPUT_DATE_PART` | a month or year is asked for, but a column holds whole dates | #1480: `201304` instead of `04` |
+| `OUTPUT_SHAPE` | one row of N values is asked for, but N rows came back | #1482 |
+| `AGGREGATION_GRAIN` | the highest per month or customer, but MAX, MIN or a top-1 sort on single rows of a table with several rows per unit, and no GROUP BY | #1498 |
+
+A flagged chain gets one retry, told exactly what to change. If it's still flagged, it keeps its answer but ranks below unflagged ones in the vote, and **Adaptive no longer stops early when either of its first two chains is flagged**: two chains making the same mistake isn't evidence. In Adaptive, Full, Mixed and English; not Original.
+
+**Measured on every saved chain answer (2,226), with no model calls:** using a stand-in spec read from each question's words, the checks flagged 39 wrong answers, all on #1480, #1498 and #1482, and **none of the 1,834 right ones**. Live, the model writes the spec, which can differ, and how often a flag gets repaired is still to be measured.
+
+**Results on 50–300:** not yet run. Saved Adaptive runs for comparison on corrected BIRD 50–300 (225 of 251) are in `data/text_to_sql/eval/runs_archive/before-official-run-20261105-235445/`.
 
 ---
 

@@ -289,7 +289,8 @@ class TextToSQLPipeline:
                 group = self._largest_agreeing_group([a for a in new if a["status"] == "ok"])
                 if len(group) >= 2:
                     chosen = group[-1]
-                    confidence = "high" if len(group) == len(new) else "medium"
+                    # Version-22, the same rule in every flow: every try that answered agrees
+                    confidence = "high" if len(group) == sum(a["status"] == "ok" for a in new) else "medium"
             else:
                 # any two answers (from either round) with the same result
                 group = self._largest_agreeing_group(valid)
@@ -522,6 +523,13 @@ class TextToSQLPipeline:
             attempt["problems"] = [f"Could not generate SQL: {e}"]
             return attempt
 
+        return self.check_and_run(attempt, tables, now)
+
+    def check_and_run(self, attempt: dict, tables: List[dict], now) -> dict:
+        """
+        The before-run checks on attempt["sql"], then run it (Version-22: also used by the Full and
+        Adaptive flows, so every flow's SQL passes exactly the same checks).
+        """
         sql = attempt["sql"]
 
         # safety first: read with the SQL parser; anything but one plain read query is never run

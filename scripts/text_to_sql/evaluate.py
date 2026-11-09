@@ -35,8 +35,8 @@ DEFAULT_QUESTIONS = Path("data/text_to_sql/retail_store/questions.json")
 
 
 def as_set(rows):
-    # order-insensitive comparison; round floats so 399.99 == 399.9900000001
-    return {tuple(round(v, 4) if isinstance(v, float) else v for v in row) for row in rows}
+    """Rows in any order, repeats ignored, values compared exactly, as BIRD's own scorer does."""
+    return {tuple(row) for row in rows}
 
 
 def tables_in(sql, table_names):

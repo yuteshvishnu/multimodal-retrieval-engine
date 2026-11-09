@@ -34,8 +34,9 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from backend import usage
+from backend.text_to_sql.flows import FlowRunner, adaptive_vote, fit_accuracies, majority_vote, weighted_vote
 from backend.config import (
-    BIRD_CORRECTED_DIR, BIRD_MINI_DEV_DIR,
+    BIRD_CORRECTED_DIR, BIRD_MINI_DEV_DIR, EVAL_MODELS, MIXED_MODELS, SQL_REFRESHER,
     EVAL_CALLS_PER_QUESTION, EVAL_RATE_LIMIT_TRIES, EVAL_RATE_LIMIT_WAIT_SECONDS, EVAL_SECONDS_PER_QUESTION,
     EVAL_TOKENS_PER_QUESTION, LLM_MODEL_SQL, LLM_PRICES, LLM_PROVIDER, MAX_MEANING_TRIES, PROVIDER_TOKENS_PER_DAY,
     PROVIDERS,
@@ -78,8 +79,9 @@ DIFFICULTY = {"easy": "simple", "medium": "moderate", "hard": "challenging"}
 
 
 def as_set(rows) -> set:
-    """Rows in any order; floats rounded so 399.99 == 399.9900000001 (as in evaluate.py)."""
-    return {tuple(round(v, 4) if isinstance(v, float) else v for v in row) for row in rows}
+    """Rows in any order, repeats ignored, values compared exactly: BIRD's own scorer (evaluation_ex.py,
+    set(predicted) == set(gold)). Exact also means 66.62300 isn't 66.62301."""
+    return {tuple(row) for row in rows}
 
 
 def now() -> str:
@@ -130,17 +132,104 @@ def suites() -> List[Dict]:
     return out
 
 
-def estimate(questions: int) -> Dict:
-    """What a run of this many questions should take, from measured averages (config.py)."""
-    price_in, price_out = LLM_PRICES.get(LLM_MODEL_SQL, (0, 0))
-    tokens = questions * EVAL_TOKENS_PER_QUESTION
-    cost = tokens * 0.75 / 1e6 * price_in + tokens * 0.25 / 1e6 * price_out  # about 3/4 of tokens are input
+def models() -> List[Dict]:
+    """The models an evaluation can use with this provider, smallest first, each with its price."""
+    out = []
+    for model in EVAL_MODELS:
+        if LLM_PROVIDER != "openrouter" and model["openrouter_only"]:
+            continue
+        price_in, price_out = LLM_PRICES.get(model["id"], (0, 0))
+        out.append({"id": model["id"], "name": model["name"], "host": model["host"],
+                    "price_in": price_in, "price_out": price_out})
+    return out
+
+
+def check_model(model: str) -> None:
+    if model not in {m["id"] for m in models()}:
+        raise ValueError(f"Unknown model: {model}.")
+
+
+def model_of(run: Dict) -> str:
+    return run.get("model") or LLM_MODEL_SQL
+
+
+def estimate(questions: int, run_flows: Optional[List[str]] = None, model: str = LLM_MODEL_SQL) -> Dict:
+    """What a run of this many questions should take, from measured averages (config.py); with
+    several flows (a comparison), each flow's run, scaled by its LLM calls per question."""
+    run_flows = run_flows or [DEFAULT_FLOW]
+    scale = sum(FLOWS[f]["calls"] for f in run_flows) / EVAL_CALLS_PER_QUESTION
+    tokens = round(questions * EVAL_TOKENS_PER_QUESTION * scale)
+    cost = 0.0
+    for flow in run_flows:
+        share = tokens * FLOWS[flow]["calls"] / sum(FLOWS[f]["calls"] for f in run_flows)
+        priced = [m["id"] for m in MIXED_MODELS] if flow == "mixed" else [model]  # each model does its share
+        for name in priced:
+            price_in, price_out = LLM_PRICES.get(name, (0, 0))
+            cost += share / len(priced) * (0.75 * price_in + 0.25 * price_out) / 1e6  # about 3/4 of tokens are input
     return {
-        "questions": questions, "llm_calls": round(questions * EVAL_CALLS_PER_QUESTION), "tokens": tokens,
-        "cost": round(cost, 4), "minutes": round(questions * EVAL_SECONDS_PER_QUESTION / 60, 1),
+        "questions": questions, "llm_calls": round(questions * EVAL_CALLS_PER_QUESTION * scale), "tokens": tokens,
+        "cost": round(cost, 4), "minutes": round(questions * EVAL_SECONDS_PER_QUESTION * scale / 60, 1),
         "over_daily_limit": bool(PROVIDER_TOKENS_PER_DAY) and tokens > PROVIDER_TOKENS_PER_DAY,
         "daily_limit": PROVIDER_TOKENS_PER_DAY, "provider": PROVIDERS[LLM_PROVIDER]["name"],
     }
+
+
+# Version-22: how Scout answers a question. Each run records its flow, so flows can be compared on
+# the same questions (Evaluation -> Comparison). Full and Adaptive follow "Ask Me Anything" (Arora, ...,
+# Sala, Re): different routes to the SQL and a weighted vote instead of three tries from one prompt.
+FLOWS = {
+    "original": {
+        "name": "Original", "ready": True, "calls": EVAL_CALLS_PER_QUESTION,
+        "about": "One meaning, steps, 3 SQL tries from the same prompt, a retry round if they disagree, majority vote.",
+    },
+    "full": {
+        "name": "Full (paper)", "ready": True, "calls": 8,
+        "about": "4 prompt chains (each rewrites the question its own way, then writes SQL, with its own worked "
+                 "examples), majority vote, no retry. 8 calls.",
+    },
+    "adaptive": {
+        "name": "Adaptive", "ready": True, "calls": 4.5,  # 4 when the first 2 chains agree, 8 when not
+        "about": "Our idea, not the paper's: the first 2 chains agree on an answer with data, stop at 4 calls; if not, "
+                 "all 4 and a vote (8). Rejected SQL gets one retry. A Full run also gives a result, without the retries.",
+    },
+}
+FLOWS["mixed"] = {
+    "name": "Mixed + weak supervision", "ready": LLM_PROVIDER == "openrouter", "calls": 6,
+    "note": "needs OpenRouter",
+    "about": "Our extension: 3 different models answer each question, with rewrite styles and SQL methods shuffled "
+             "among them; learned trust picks the answer. Uses its own models, whichever is chosen above. 6 calls.",
+}
+FLOWS["adaptive_english"] = {  # Version-24
+    "name": "Adaptive + English program", "ready": True, "calls": 4.5,
+    "about": "Adaptive, but the model never writes SQL: it writes a sentence in the strict English format, and the "
+             "english2sqlite program turns it into SQL, with no AI. A rejected sentence gets one retry. 4 to 12 calls.",
+}
+DEFAULT_FLOW = "original"
+FLOW_MODES = {  # what the run did, shown on its scorecard
+    "original": "No user: the first meaning and the steps are accepted as written",
+    "full": "No user: 4 prompt chains and a majority vote, no retry",
+    "adaptive": "No user: 2 prompt chains, the other 2 and a majority vote only if needed, one retry for rejected SQL",
+    "adaptive_english": "No user: Adaptive, with the model writing format sentences and english2sqlite writing the SQL",
+    "mixed": "No user: 3 different models, shuffled styles and SQL methods, no retry. This score is the live majority "
+             "vote; the Comparison ring adds weak supervision",
+}
+COMPARISONS_FOLDER = "comparisons"  # Version-22: run queues, under runs/ but never read as runs
+
+
+def flows() -> List[Dict]:
+    return [{"id": key, **info} for key, info in FLOWS.items()]
+
+
+def flow_of(run: Dict) -> str:
+    """Runs from before Version-22 have no flow: they all used the original one."""
+    return run.get("flow") or DEFAULT_FLOW
+
+
+def check_flow(flow: str) -> None:
+    if flow not in FLOWS:
+        raise ValueError(f"Unknown flow: {flow}.")
+    if not FLOWS[flow]["ready"]:
+        raise ValueError(f"The {FLOWS[flow]['name']} flow has no run of its own: {FLOWS[flow].get('note', 'not built yet')}.")
 
 
 def is_rate_limited(error: str) -> bool:
@@ -150,13 +239,17 @@ def is_rate_limited(error: str) -> bool:
 
 class EvalRunner:
     def __init__(self, pipeline, runs_dir: Path = RUNS_DIR, sleep: Callable[[float], None] = time.sleep,
-                 pipeline_for: Optional[Callable[[Path], object]] = None):
+                 pipeline_for: Optional[Callable[[Path], object]] = None,
+                 practice_for: Optional[Callable[[], object]] = None):
         """
         pipeline: the app's Scout, for the practice suite.
         pipeline_for(folder): makes a Scout over just that folder's database (BIRD: one per db_id).
+        practice_for(): makes another Scout like the app's, for a practice run on another model
+        (the app's own Scout never changes model, so a run can't affect questions asked meanwhile).
         """
         self.pipeline = pipeline
         self.pipeline_for = pipeline_for
+        self.practice_for = practice_for
         self._pipelines: Dict[str, object] = {}  # db_id -> its pipeline, made when first needed
         self.runs_dir = runs_dir
         self.sleep = sleep  # tests pass a no-op
@@ -164,24 +257,41 @@ class EvalRunner:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self.queue: Optional[Dict] = None  # Version-22: the comparison being run (flows one after another)
+        self._queue_thread: Optional[threading.Thread] = None
+        self._queue_stop = False
 
     # ---------- control ----------
 
     def busy(self) -> bool:
-        return self._thread is not None and self._thread.is_alive()
+        return (self._thread is not None and self._thread.is_alive()) or self._queue_busy()
 
-    def start(self, suite: str, first: int = 1, last: int = 0, wait: bool = False) -> Dict:
-        if self.busy():
+    def _queue_busy(self) -> bool:
+        return self._queue_thread is not None and self._queue_thread.is_alive()
+
+    def _run_busy(self, queued: bool) -> bool:
+        """Busy for a new run: the queue starts its own runs, so it only waits for the run thread."""
+        return (self._thread is not None and self._thread.is_alive()) or (not queued and self._queue_busy())
+
+    def start(self, suite: str, first: int = 1, last: int = 0, wait: bool = False,
+              flow: str = DEFAULT_FLOW, _queued: bool = False, model: str = LLM_MODEL_SQL) -> Dict:
+        if self._run_busy(_queued):
             raise RuntimeError("An evaluation is already running.")
+        check_flow(flow)
+        check_model(model)
+        if flow == "mixed":  # it picks its own models; the run is filed under the default
+            model = LLM_MODEL_SQL
         if suite not in SUITES or not SUITES[suite]["path"].exists():
             raise ValueError("That test suite isn't available.")
         questions = pick(load_questions(suite), first, last)
         info = SUITES[suite]
         self.run = {
             "id": datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4],
-            "suite": suite, "benchmark": info["name"], "short": info["short"], "sample": False,
+            "suite": suite, "benchmark": info["name"], "short": info["short"], "sample": False, "flow": flow,
             "status": "running", "message": None, "run_at": now(), "finished_at": None,
-            "model": LLM_MODEL_SQL, "provider": PROVIDERS[LLM_PROVIDER]["name"], "mode": "No user: the first meaning and the steps are accepted as written",
+            "model": model, "provider": PROVIDERS[LLM_PROVIDER]["name"], "mode": FLOW_MODES[flow],
+            "sql_refresher": SQL_REFRESHER,  # Version-23: so runs with and without it can be told apart
+            **({"models": [m["id"] for m in MIXED_MODELS]} if flow == "mixed" else {}),
             "planned": [q["id"] for q in questions], "range": [questions[0]["n"], questions[-1]["n"]],
             "hints": "BIRD's evidence" if "databases" in info else "none", "current": None, "wait_until": None,
             "elapsed_seconds": 0, "results": [],
@@ -205,7 +315,7 @@ class EvalRunner:
         info = SUITES[suite]
         self.run = {
             "id": datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4],
-            "check": True, "question_id": q["id"],
+            "check": True, "question_id": q["id"], "flow": DEFAULT_FLOW,
             "suite": suite, "benchmark": info["name"], "short": info["short"], "sample": False,
             "status": "running", "message": None, "run_at": now(), "finished_at": None,
             "model": LLM_MODEL_SQL, "provider": PROVIDERS[LLM_PROVIDER]["name"],
@@ -227,12 +337,14 @@ class EvalRunner:
                 out.append(run)
         return out
 
-    def resume(self, run_id: str, wait: bool = False) -> Dict:
-        if self.busy():
+    def resume(self, run_id: str, wait: bool = False, _queued: bool = False) -> Dict:
+        if self._run_busy(_queued):
             raise RuntimeError("An evaluation is already running.")
         run = self.load(run_id)
         if run is None or run["status"] == "finished":
             raise ValueError("Only a stopped run can be resumed.")
+        if flow_of(run) == "mixed" and run.get("models") != [m["id"] for m in MIXED_MODELS]:
+            raise ValueError("This Mixed run used other models, so it can't be resumed: start a new one.")
         done = {r["id"] for r in run["results"]}
         questions = [q for q in load_questions(run["suite"]) if q["id"] in run["planned"] and q["id"] not in done]
         self.run = {**run, "status": "running", "message": None, "finished_at": None}
@@ -240,8 +352,10 @@ class EvalRunner:
         return self._launch(questions, wait)
 
     def stop(self) -> None:
-        """Stops after the question being answered (a question is never cut in half)."""
+        """Stops after the question being answered (a question is never cut in half); a comparison
+        being run stops there too, and can be resumed."""
         self._stop.set()
+        self._queue_stop = True
 
     def _launch(self, questions: List[Dict], wait: bool) -> Dict:
         self._stop.clear()
@@ -250,6 +364,285 @@ class EvalRunner:
         if wait:  # tests
             self._thread.join()
         return self.progress()
+
+    # ---------- Version-22: compare flows on the same questions ----------
+
+    def _saved_runs(self) -> List[Dict]:
+        out = []
+        for path in sorted(self.runs_dir.glob("*.json")) if self.runs_dir.exists() else []:
+            try:
+                out.append(json.loads(path.read_text(encoding="utf-8")))
+            except (OSError, json.JSONDecodeError):
+                continue
+        return out
+
+    def compare(self, suite: str, first: int = 1, last: int = 0, model: str = LLM_MODEL_SQL) -> Dict:
+        """
+        Each flow's score on the suite's questions first..last (last = 0: to the end), from its newest
+        run that answered every one of them; a longer run counts too. Questions are always the same
+        set, so the rings can be compared. Full's saved chains also give, with no LLM calls, a
+        weak-supervision vote, 3 chains instead of 4, and Adaptive. Only runs on this model count.
+        """
+        if suite not in SUITES or not SUITES[suite]["path"].exists():
+            raise ValueError("That test suite isn't available.")
+        questions = load_questions(suite)
+        chosen = pick(questions, first, last)
+        ids = [q["id"] for q in chosen]
+        best: Dict[str, Dict] = {}
+        for run in self._saved_runs():
+            if run.get("suite") != suite or run.get("sample"):
+                continue
+            if model_of(run) != model and flow_of(run) != "mixed":  # Mixed has its own models: always shown
+                continue
+            answered = {r["id"]: r for r in run.get("results", [])}
+            if not set(ids) <= set(answered):
+                continue
+            flow = flow_of(run)
+            if flow not in best or run["run_at"] > best[flow]["run_at"]:
+                best[flow] = {**run, "_answers": answered}
+
+        def results_of(run):
+            return [run["_answers"][i] for i in ids]
+
+        out, marks = [], {}
+
+        def add(key, name, about, ready, run, answers, confidence, calls, cost, **extra):
+            """answers: id -> right or wrong, in the order of the questions."""
+            entry = {"flow": key, "name": name, "about": about, "ready": ready, "run": None, **extra}
+            if run:
+                right = sum(answers.values())
+                entry["run"] = {
+                    "id": run["id"], "run_at": run["run_at"], "model": run.get("model"), "status": run["status"],
+                    "correct": right, "total": len(ids), "accuracy": round(100 * right / len(ids), 1),
+                    "llm_calls": calls, "calls_per_question": round(calls / len(ids), 1), "cost": round(cost, 5),
+                    # the problem the paper targets: every chain agreed, and they were wrong
+                    "confident_wrong": sum(1 for i in ids if not answers[i] and confidence[i] == "high"),
+                    "confident": sum(1 for i in ids if confidence[i] == "high"),
+                    "confident_right": sum(1 for i in ids if answers[i] and confidence[i] == "high"),
+                    "older": bool(extra.pop("older", False)),
+                }
+                for i, ok in answers.items():
+                    marks.setdefault(i, {})[key] = ok
+            out.append(entry)
+
+        def plain(key, info):
+            run = best.get(key)
+            if not run:
+                return add(key, info["name"], info["about"], info["ready"], None, {}, {}, 0, 0)
+            results = results_of(run)
+            has_chains = all(r.get("chains") for r in results)
+            extra = {"older": key != DEFAULT_FLOW and not has_chains}
+            if has_chains:
+                wrong = [r for r in results if not r["correct"]]
+                # was a right answer among the tries, even though another was picked?
+                extra["misses"] = len(wrong)
+                extra["right_was_there"] = sum(1 for r in wrong if any(c.get("correct") for c in r["chains"]))
+                if key in ("adaptive", "adaptive_english"):
+                    extra["stopped_early"] = sum(1 for r in results if len(r["chains"]) == 2)
+            add(key, info["name"], info["about"], info["ready"], run,
+                {r["id"]: r["correct"] for r in results}, {r["id"]: r.get("confidence") for r in results},
+                sum(r.get("llm_calls", 0) for r in results), sum(r.get("cost", 0) for r in results), **extra)
+
+        plain(DEFAULT_FLOW, FLOWS[DEFAULT_FLOW])
+        plain("full", FLOWS["full"])
+        full = best.get("full")
+        results = results_of(full) if full else []
+        replayable = bool(results) and all(r.get("chains") for r in results)
+        if replayable:
+            entry = out[-1]
+            per_chain = {}
+            for r in results:
+                for c in r["chains"]:
+                    per_chain[c["chain"]] = per_chain.get(c["chain"], 0) + bool(c.get("correct"))
+            entry["chains"] = [{"chain": c, "correct": n} for c, n in per_chain.items()]
+            entry["average_chain"] = round(100 * sum(per_chain.values()) / (len(per_chain) * len(ids)), 1) if per_chain else None
+            three = [majority_vote(r["chains"], 3) for r in results]
+            entry["three_chains"] = sum(1 for d in three if d and d["winner"].get("correct"))
+
+            accuracies = fit_accuracies([r["chains"] for r in results])
+            votes = {r["id"]: weighted_vote(r["chains"], accuracies) for r in results}
+            add("full_ws", "Full + weak supervision",
+                "The same answers as Full, with each chain's vote weighted by the accuracy learned from how often "
+                "the chains agree, never from correct answers.", True, full,
+                {i: bool(d and d["winner"].get("correct")) for i, d in votes.items()},
+                {i: (d["confidence"] if d else None) for i, d in votes.items()},
+                sum(r.get("llm_calls", 0) for r in results), sum(r.get("cost", 0) for r in results),
+                replayed=True, accuracies={c: round(a, 3) for c, a in accuracies.items()} if accuracies else None)
+
+        # Adaptive: its own live run if that's newer, else replayed from Full's saved chains
+        live_adaptive = best.get("adaptive")
+        live_is_new = live_adaptive and all(live_adaptive["_answers"][i].get("chains") for i in ids)
+        if replayable and not (live_is_new and live_adaptive["run_at"] > full["run_at"]):
+            votes = {r["id"]: adaptive_vote(r["chains"]) for r in results}
+            calls = {r["id"]: (votes[r["id"]] or {}).get("calls", 8) for r in results}
+            add("adaptive", FLOWS["adaptive"]["name"], FLOWS["adaptive"]["about"], True, full,
+                {i: bool(d and d["winner"].get("correct")) for i, d in votes.items()},
+                {i: (d["confidence"] if d else None) for i, d in votes.items()},
+                sum(calls.values()),
+                sum(r.get("cost", 0) * calls[r["id"]] / max(r.get("llm_calls", 0), 1) for r in results),
+                replayed=True, stopped_early=sum(1 for n in calls.values() if n == 4))
+        else:
+            plain("adaptive", FLOWS["adaptive"])
+
+        plain("adaptive_english", FLOWS["adaptive_english"])
+
+        # Mixed: weak supervision over its 4 models, worked out from its saved answers, with the majority beside it
+        mixed = best.get("mixed")
+        results = results_of(mixed) if mixed else []
+        info = FLOWS["mixed"]
+        if results and all(r.get("chains") for r in results):
+            accuracies = fit_accuracies([r["chains"] for r in results])
+            votes = {r["id"]: weighted_vote(r["chains"], accuracies) for r in results}
+            answers = {i: bool(d and d["winner"].get("correct")) for i, d in votes.items()}
+            per_chain = {}
+            for r in results:
+                for c in r["chains"]:
+                    per_chain[c["chain"]] = per_chain.get(c["chain"], 0) + bool(c.get("correct"))
+            add("mixed", info["name"], info["about"], True, {**mixed, "model": f"{len(per_chain)} models"}, answers,
+                {i: (d["confidence"] if d else None) for i, d in votes.items()},
+                sum(r.get("llm_calls", 0) for r in results), sum(r.get("cost", 0) for r in results),
+                accuracies={c: round(a, 3) for c, a in accuracies.items()} if accuracies else None,
+                majority=sum(1 for r in results if r["correct"]),
+                chains=[{"chain": c, "correct": n} for c, n in per_chain.items()],
+                average_chain=round(100 * sum(per_chain.values()) / (len(per_chain) * len(ids)), 1) if per_chain else None,
+                misses=sum(1 for i in ids if not answers[i]),
+                right_was_there=sum(1 for r in results if not answers[r["id"]] and any(c.get("correct") for c in r["chains"])))
+        else:
+            add("mixed", info["name"], info["about"], info["ready"], None, {}, {}, 0, 0)
+
+        compared = [e["flow"] for e in out if e["run"]]
+        differ = []
+        for q in chosen:
+            answers = marks.get(q["id"], {})
+            if len(set(answers.values())) > 1:
+                differ.append({"id": q["id"], "n": q["n"], "question": q["question"], "db_id": q["db_id"],
+                               "difficulty": q.get("difficulty"), "right": answers})
+        return {"suite": suite, "model": model, "first": chosen[0]["n"], "last": chosen[-1]["n"], "questions": len(ids),
+                "of": len(questions), "flows": out, "compared": compared, "differ": differ}
+
+    def start_comparison(self, suite: str, first: int = 1, last: int = 0, chosen_flows: Optional[List[str]] = None,
+                         reuse: bool = True, wait: bool = False, model: str = LLM_MODEL_SQL) -> Dict:
+        """
+        Runs the chosen flows on the same questions, one after another (in parallel they would hit
+        the provider's rate limits). With reuse, a flow that already has a run covering those
+        questions isn't run again.
+        """
+        if self.busy():
+            raise RuntimeError("An evaluation is already running.")
+        if not chosen_flows:
+            raise ValueError("Pick at least one flow.")
+        for flow in chosen_flows:
+            check_flow(flow)
+        check_model(model)
+        compared = self.compare(suite, first, last, model)
+        current = {e["flow"]: e["run"] for e in compared["flows"]}
+        items = []
+        for flow in chosen_flows:
+            # an older Full (before the 4 chains) doesn't count as a run of today's Full
+            if reuse and current.get(flow) and not current[flow].get("older"):
+                items.append({"flow": flow, "status": "reused", "run_id": current[flow]["id"]})
+            else:
+                items.append({"flow": flow, "status": "waiting", "run_id": None})
+        self.queue = {
+            "id": datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4],
+            "suite": suite, "model": model, "first": compared["first"], "last": compared["last"], "status": "running",
+            "message": None,
+            "started_at": now(), "finished_at": None, "items": items,
+        }
+        self._save_queue()
+        return self._launch_queue(wait)
+
+    def resume_comparison(self, wait: bool = False) -> Dict:
+        if self.busy():
+            raise RuntimeError("An evaluation is already running.")
+        if not self.queue:
+            self.queue = self._newest_queue()
+        if not self.queue or self.queue["status"] not in ("stopped", "failed"):
+            raise ValueError("Only a stopped comparison can be resumed.")
+        self.queue.update(status="running", message=None, finished_at=None)
+        self._save_queue()
+        return self._launch_queue(wait)
+
+    def comparison(self) -> Optional[Dict]:
+        """The comparison being run, or the newest one, with each run's progress."""
+        queue = self.queue or self._newest_queue()
+        if queue is None:
+            return None
+        queue = json.loads(json.dumps(queue))
+        live = self.progress() if self.busy() else None
+        for item in queue["items"]:
+            if item["status"] == "running" and live and live.get("id") == item["run_id"]:
+                item["done"], item["total"], item["correct"] = live["done"], live["total"], live["correct"]
+            elif item["run_id"]:
+                run = self.load(item["run_id"])
+                if run:
+                    results = run.get("results", [])
+                    item["done"], item["total"] = len(results), len(run.get("planned", results))
+                    item["correct"] = sum(1 for r in results if r["correct"])
+        return queue
+
+    def _launch_queue(self, wait: bool) -> Dict:
+        self._queue_stop = False
+        self._queue_thread = threading.Thread(target=self._queue_work, daemon=True, name="eval-comparison")
+        self._queue_thread.start()
+        if wait:  # tests
+            self._queue_thread.join()
+        return self.comparison()
+
+    def _queue_work(self) -> None:
+        queue = self.queue
+        try:
+            for item in queue["items"]:
+                if item["status"] in ("done", "reused"):
+                    continue
+                if self._queue_stop:
+                    break
+                with self._lock:
+                    item["status"] = "running"
+                self._save_queue()
+                if item["run_id"]:  # stopped earlier: carry on from where it stopped
+                    self.resume(item["run_id"], _queued=True)
+                else:
+                    # the run's id is known as soon as it starts, so the tab can show it live
+                    started = self.start(queue["suite"], queue["first"], queue["last"], flow=item["flow"], _queued=True,
+                                         model=queue.get("model", LLM_MODEL_SQL))
+                    with self._lock:
+                        item["run_id"] = started["id"]
+                self._save_queue()
+                self._thread.join()  # wait for this flow's run to end
+                status = (self.load(item["run_id"]) or {}).get("status")
+                with self._lock:
+                    item["status"] = "done" if status == "finished" else (status or "failed")
+                self._save_queue()
+                if status != "finished":
+                    break
+            pending = [i for i in queue["items"] if i["status"] not in ("done", "reused")]
+            with self._lock:
+                queue.update(status="stopped" if pending else "finished", finished_at=now(),
+                             message="Stopped. Resume to carry on." if pending else None)
+        except Exception as e:  # never leave a comparison looking alive
+            with self._lock:
+                queue.update(status="failed", finished_at=now(), message=f"The comparison stopped on an error: {e}")
+        self._save_queue()
+
+    def _save_queue(self) -> None:
+        with self._lock:
+            text = json.dumps(self.queue, indent=1)
+            queue_id = self.queue["id"]
+        folder = self.runs_dir / COMPARISONS_FOLDER
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{queue_id}.json").write_text(text + "\n", encoding="utf-8")
+
+    def _newest_queue(self) -> Optional[Dict]:
+        folder = self.runs_dir / COMPARISONS_FOLDER
+        files = sorted(folder.glob("*.json")) if folder.exists() else []
+        queue = json.loads(files[-1].read_text(encoding="utf-8")) if files else None
+        if queue and queue["status"] == "running":  # the server restarted while it ran
+            queue.update(status="stopped", message="Stopped when the server restarted. Resume to carry on.")
+            for item in queue["items"]:
+                if item["status"] == "running":
+                    item["status"] = "stopped"
+        return queue
 
     # ---------- reading ----------
 
@@ -358,22 +751,32 @@ class EvalRunner:
             self.run["current"] = {"id": q["id"], "question": q["question"], "stage": stage,
                                    "index": len(self.run["results"]) + 1, "started": began or time.time()}
 
-    def pipeline_for_db(self, suite: str, db_id: str):
-        """The app's Scout, or for BIRD a Scout that has only this database (also used by the agent)."""
+    def pipeline_for_db(self, suite: str, db_id: str, model: str = LLM_MODEL_SQL):
+        """The app's Scout, or for BIRD a Scout that has only this database (also used by the agent).
+        Each model gets its own Scouts, so a run never changes the model of another."""
         databases = SUITES.get(suite, {}).get("databases")
-        if not databases:
+        if not databases and model == LLM_MODEL_SQL:
             return self.pipeline
         with self._lock:
-            key = (suite, db_id)  # BIRD and corrected BIRD share database names, not descriptions
+            key = (suite, db_id, model)  # BIRD and corrected BIRD share database names, not descriptions
             if key not in self._pipelines:
-                folder = databases / db_id
-                if not folder.is_dir() or self.pipeline_for is None:
-                    raise RuntimeError(f"BIRD database {db_id} isn't available.")
-                self._pipelines[key] = self.pipeline_for(folder)
+                if databases:
+                    folder = databases / db_id
+                    if not folder.is_dir() or self.pipeline_for is None:
+                        raise RuntimeError(f"BIRD database {db_id} isn't available.")
+                    scout = self.pipeline_for(folder)
+                elif self.practice_for is not None:
+                    scout = self.practice_for()
+                else:
+                    raise RuntimeError("This suite can't run on another model.")
+                if model != LLM_MODEL_SQL:  # a new Scout already uses the default
+                    for part in (scout.generator, scout.interpreter, scout.planner):
+                        part.model_name = model
+                self._pipelines[key] = scout
             return self._pipelines[key]
 
     def _pipeline(self, q: Dict):
-        return self.pipeline_for_db(self.run["suite"], q["db_id"])
+        return self.pipeline_for_db(self.run["suite"], q["db_id"], model_of(self.run))
 
     def _flow(self, q: Dict, tag: str):
         """
@@ -383,6 +786,12 @@ class EvalRunner:
         """
         question = q["question"] + (f"\n(Hint: {q['evidence']})" if q.get("evidence") else "")
         pipeline = self._pipeline(q)
+        flow = flow_of(self.run)
+        if flow != DEFAULT_FLOW:  # Version-22: Full or Adaptive (backend/text_to_sql/flows.py)
+            self._stage(q, "sql")
+            result = FlowRunner(pipeline).run(question, tag, flow)
+            meaning = "\n".join(f"{a['style']}: {a['meaning']}" for a in result.get("attempts") or [])
+            return result, meaning, result.get("steps") or []
         history, result, meaning, steps = [], {}, "", []
         for _ in range(MAX_MEANING_TRIES):
             self._stage(q, "meaning")
@@ -433,6 +842,24 @@ class EvalRunner:
             outcome = "failed checks"  # valid SQL, but Scout's checks rejected every try
         else:
             outcome = "no answer"
+        # Version-22: every try's or chain's answer, and whether it was right: was a right answer there to
+        # pick? which chain is best? The gold rows are read here, after the answer: never by a vote.
+        chains = []
+        for number, a in enumerate(result.get("attempts") or [], 1):
+            chain = {"chain": a.get("chain") or f"try {number}", "status": a.get("status"), "sql": a.get("sql"),
+                     "problems": a.get("problems") or [], "meaning": a.get("meaning"), "answer": a.get("answer"),
+                     "retried": bool(a.get("retried")), "style": a.get("style"), "method": a.get("method"),
+                     "model": a.get("model"), "sentence": a.get("sentence"), "measure": a.get("measure"),
+                     "spec": a.get("spec"), "flags": a.get("flags") or [], "warnings": a.get("warnings") or [],
+                     "rows": (a.get("rows") or [])[:5], "correct": False}
+            if a.get("status") == "ok" and a.get("sql"):
+                try:
+                    _, chain_rows = pipeline.database.run_all(a["sql"])
+                    chain["correct"] = as_set(chain_rows) == as_set(gold_rows)
+                    chain["rows"] = chain_rows[:5]
+                except Exception as e:
+                    chain["problems"] = [*chain["problems"], f"Couldn't be run again: {e}"]
+            chains.append(chain)
         calls = usage.usage_store.calls_for(tag)
         entry = {
             "id": q["id"], "n": q.get("n"), "db_id": q.get("db_id", "retail_store"),
@@ -440,7 +867,7 @@ class EvalRunner:
             # evidence = the hint Scout was given (BIRD); trap = what the question tests (practice; not given)
             "question": q["question"], "evidence": q.get("evidence") or "", "trap": q.get("trap") or "",
             "gold_sql": q["gold_sql"], "sql": result.get("sql"), "correct": correct, "outcome": outcome,
-            "error": error, "expected_rows": gold_rows[:10], "rows": rows[:10],
+            "error": error, "expected_rows": gold_rows[:10], "rows": rows[:10], "chains": chains,
             "confidence": result.get("confidence"), "seconds": round(seconds, 1), **calls,
         }
         if not correct and not self.run.get("check"):

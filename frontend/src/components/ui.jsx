@@ -73,7 +73,7 @@ export function AccuracyRing({ value, size = 28, stroke = 4, children }) {
     <span className="ring" style={{ width: size, height: size }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
         <circle className="ring-track" cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} fill="none" />
-        <circle
+        {filled > 0 && <circle
           className="ring-value"
           cx={size / 2}
           cy={size / 2}
@@ -83,7 +83,7 @@ export function AccuracyRing({ value, size = 28, stroke = 4, children }) {
           strokeDasharray={`${filled * length} ${length}`}
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
           strokeLinecap="round"
-        />
+        />}
       </svg>
       {children && <span className="ring-label">{children}</span>}
     </span>

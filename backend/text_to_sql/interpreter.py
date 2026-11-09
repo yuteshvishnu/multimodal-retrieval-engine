@@ -13,6 +13,7 @@ from typing import List, Optional
 from backend.llm import chat, make_client
 
 from backend.config import LLM_API_KEY, LLM_MODEL_SQL
+from backend.text_to_sql.sql_generator import GRANULARITY_RULE_PLAIN, METRIC_RULE_PLAIN, TIME_PART_RULE_PLAIN, AVERAGE_RULE_PLAIN, VALUE_RULE_PLAIN
 
 MAX_OPTIONS = 3
 
@@ -33,6 +34,7 @@ SYSTEM_PROMPT = (
     "Write for someone who doesn't know SQL or this database: plain everyday words only. Never use "
     "table or column names (no order_date, employee_id, order_items, unit_price_cents); say 'the order "
     "date', 'the employee', 'the price' instead. If a column has no clear everyday meaning, describe "
+    + GRANULARITY_RULE_PLAIN + METRIC_RULE_PLAIN + TIME_PART_RULE_PLAIN + AVERAGE_RULE_PLAIN + VALUE_RULE_PLAIN + "\n" +
     "it as best you can. No SQL, no code formatting.\n"
     "If the question asks to change the data in any way (add, insert, update, edit, delete, remove, "
     "create, drop, rename, reset, increase...), describe it honestly as that change, never as a "

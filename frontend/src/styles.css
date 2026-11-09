@@ -3328,3 +3328,111 @@ section > .pagination {
   border: 0;
   background: none;
 }
+
+/* Version-22: Evaluation -> Comparison */
+.compare-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.compare-controls .btn {
+  margin-left: auto;
+}
+.compare-rings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+.compare-ring {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: 20px 16px;
+}
+.compare-ring h3 {
+  margin: 6px 0 0;
+  font-size: 16px;
+}
+.compare-ring.empty-ring {
+  opacity: 0.75;
+}
+.compare-score {
+  margin: 0;
+  font-weight: 600;
+}
+.compare-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--text-secondary, inherit);
+}
+.compare-reuse {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+}
+.compare-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.compare-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.compare-item-name {
+  min-width: 110px;
+  font-weight: 500;
+}
+.compare-diff {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+}
+.compare-diff .dash-question {
+  flex: 1;
+}
+.compare-marks {
+  display: flex;
+  gap: 6px;
+}
+.compare-note {
+  margin: 0 0 16px;
+}
+.compare-range {
+  margin: 0;
+  flex-wrap: wrap;
+}
+.compare-rings {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.compare-ring .badge {
+  white-space: normal;
+}
+.eval-chains {
+  margin: 12px 0;
+}
+.eval-chain summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+  flex-wrap: wrap;
+}
+.eval-model {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  margin-bottom: 14px;
+}

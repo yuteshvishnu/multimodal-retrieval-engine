@@ -48,6 +48,8 @@ LLM_MODEL_SUMMARY = "openai/gpt-oss-120b"  # offline table summaries (Text-to-SQ
 SQL_CALLS_PER_ROUND = 3
 MAX_LLM_CALLS_PER_QUESTION = 6
 SQL_TEMPERATURE = 0.7  # some variety, so agreeing answers actually mean something
+# Version-23: send the SQLite refresher with every SQL-writing call. Off, as it hasn't helped (on: SQL_REFRESHER=1 in .env)
+SQL_REFRESHER = os.getenv("SQL_REFRESHER", "0").strip() != "0"
 
 # Scout Version-8: performance limits for heavy queries
 MAX_RESULT_ROWS = 200            # rows kept per query; fetch one more to know if there are more
@@ -112,9 +114,38 @@ LLM_MAX_RETRIES = 3
 #   OpenRouter: Crusoe's prices for gpt-oss-120b, its first host (Groq through OpenRouter: 0.15 / 0.60)
 PRICES_BY_PROVIDER = {
     "groq": {"openai/gpt-oss-120b": (0.15, 0.60), "openai/gpt-oss-20b": (0.075, 0.30)},
-    "openrouter": {"openai/gpt-oss-120b": (0.05, 0.25), "openai/gpt-oss-20b": (0.03, 0.14)},
+    "openrouter": {
+        "openai/gpt-oss-120b": (0.05, 0.25),
+        "openai/gpt-oss-20b": (0.075, 0.30),  # Groq's price: Crusoe doesn't host it (OpenRouter, 2026-11-05)
+        "meta-llama/llama-3.1-8b-instruct": (0.05, 0.08),
+        "google/gemma-4-31b-it": (0.14, 0.40),
+        "meta-llama/llama-3.3-70b-instruct": (0.59, 0.79),
+        # the Mixed flow, on Crusoe (OpenRouter's list, 2026-11-06)
+        "z-ai/glm-5.3-flash": (0.15, 0.50),
+        "deepseek/deepseek-v4.1-flash": (0.29, 1.20),
+        "nvidia/nemotron-3.5-super-vl": (0.10, 0.40),
+    },
 }
 LLM_PRICES = PRICES_BY_PROVIDER[LLM_PROVIDER]
+
+# Version-22: the Mixed flow's voters: three labs, each answering every question once. OpenRouter only.
+# GLM 5.3 Flash was removed after its first run: it thought for 131,072 tokens and 460 seconds on one rewrite.
+MIXED_MODELS = [
+    {"id": "openai/gpt-oss-120b", "voter": "GPT-OSS 120B"},
+    {"id": "deepseek/deepseek-v4.1-flash", "voter": "DeepSeek V4.1 Flash"},
+    {"id": "nvidia/nemotron-3.5-super-vl", "voter": "Nemotron 3.5 Super"},
+]
+
+# Version-22: the models an evaluation can use, smallest to largest (size, not measured quality). Each is
+# hosted by one of OPENROUTER_PROVIDERS, checked against OpenRouter's list on 2026-11-05, so no new
+# host sees anything. Their ids only work through OpenRouter, except gpt-oss on Groq directly.
+EVAL_MODELS = [
+    {"id": "meta-llama/llama-3.1-8b-instruct", "name": "Llama 3.1 8B", "host": "Groq", "openrouter_only": True},
+    {"id": "openai/gpt-oss-20b", "name": "GPT-OSS 20B", "host": "Groq", "openrouter_only": False},
+    {"id": "google/gemma-4-31b-it", "name": "Gemma 4 31B", "host": "Crusoe", "openrouter_only": True},
+    {"id": "meta-llama/llama-3.3-70b-instruct", "name": "Llama 3.3 70B", "host": "Groq", "openrouter_only": True},
+    {"id": "openai/gpt-oss-120b", "name": "GPT-OSS 120B", "host": "Crusoe", "openrouter_only": False},
+]
 
 # Privacy: Groq sees the question and the schema. When False, Scout never sends data rows:
 # no sample rows when writing table descriptions, no result rows in the disagreement feedback.

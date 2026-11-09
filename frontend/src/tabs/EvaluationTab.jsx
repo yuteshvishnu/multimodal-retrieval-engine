@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getJson, postForm } from "../api.js";
 import { AccuracyRing, ErrorAlert, Icon, Loading, Pagination, SqlCode } from "../components/ui.jsx";
+import CompareView from "./CompareView.jsx";
 import IssuesView, { RecheckSection } from "./IssuesView.jsx";
 
 // Evaluation (Version-13): how accurate Scout is on a benchmark (BIRD), and why it got questions
@@ -9,6 +10,7 @@ import IssuesView, { RecheckSection } from "./IssuesView.jsx";
 
 const VIEWS = [
   { id: "accuracy", label: "Accuracy check", icon: "target" },
+  { id: "compare", label: "Comparison", icon: "chart" }, // Version-22
   { id: "issues", label: "Issues", icon: "agent" },
 ];
 
@@ -72,6 +74,9 @@ export default function EvaluationTab({ active, onRunFinished }) {
             onRunFinished?.();
           }}
         />
+      </section>
+      <section hidden={view !== "compare"}>
+        <CompareView active={active && view === "compare"} />
       </section>
       <section hidden={view !== "issues"}>
         <IssuesView
@@ -271,7 +276,12 @@ function Scorecard({ summary }) {
             {summary.provider && <> via {summary.provider}</>}
             {summary.run_at && <> · {formatDate(summary.run_at)}</>}
           </p>
-          {summary.mode && <p className="muted small">{summary.mode}</p>}
+          {summary.mode && (
+            <p className="muted small">
+              {summary.flow && <>Flow: {summary.flow} · </>}
+              {summary.mode}
+            </p>
+          )}
           <div className="eval-outcomes">
             {outcomes.map(([id, o]) => (
               <span key={id} className={`badge ${o.style}`}>
@@ -380,6 +390,27 @@ function ResultRow({ result: r, sample, suite, onOpenIssues }) {
               {!r.correct && <RowsLine label="Expected" rows={r.expected_rows} />}
             </div>
           </div>
+          {r.chains?.length > 0 && (
+            <div className="eval-chains">
+              <div className="label">Every try or chain</div>
+              {r.chains.map((c) => (
+                <details key={c.chain} className="eval-chain">
+                  <summary>
+                    <span className={`eval-mark ${c.correct ? "right" : "wrong"}`}>
+                      <Icon name={c.correct ? "check" : "x"} size={12} />
+                    </span>
+                    <span>{c.chain}</span>
+                    <span className="muted small">
+                      {c.status === "ok" ? (c.rows || []).slice(0, 2).map((row) => row.join(", ")).join(" · ") || "no rows" : c.problems?.[0] || c.status}
+                    </span>
+                  </summary>
+                  {c.meaning && <p className="muted small">{c.meaning}</p>}
+                  {c.sentence && <p className="small"><b>Sentence:</b> {c.sentence}</p>}
+                  {c.sql && <SqlCode sql={c.sql} />}
+                </details>
+              ))}
+            </div>
+          )}
           <p className="muted small">
             {r.llm_calls} LLM calls · {formatCost(r.cost)}
             {r.confidence && <> · {r.confidence} confidence</>}
@@ -488,10 +519,10 @@ function RunControl({ active, onEnded }) {
     }
   }
 
-  async function start(suite, first, last) {
+  async function start(suite, first, last, flow, model) {
     setError("");
     try {
-      const started = await postForm("/api/eval/runs", { suite, first, last });
+      const started = await postForm("/api/eval/runs", { suite, first, last, flow, model });
       setSetup(false);
       setRun(started);
       lastStatus.current = "running";
@@ -524,6 +555,10 @@ function RunControl({ active, onEnded }) {
 function RunSetup({ onStart, onCancel }) {
   const [suites, setSuites] = useState(null);
   const [suite, setSuite] = useState("practice");
+  const [flows, setFlows] = useState([]);
+  const [flow, setFlow] = useState("original"); // Version-22: how Scout answers
+  const [models, setModels] = useState([]);
+  const [model, setModel] = useState(""); // Version-22: which LLM answers (empty: the default)
   // Version-18: questions first..last (1-based, both included), in the suite's own order
   const [first, setFirst] = useState(1);
   const [last, setLast] = useState(5);
@@ -542,13 +577,16 @@ function RunSetup({ onStart, onCancel }) {
   }
 
   useEffect(() => {
-    getJson("/api/eval/suites", { questions: count || 1 })
+    getJson("/api/eval/suites", { questions: count || 1, flows_to_run: flow, ...(model ? { model } : {}) })
       .then((data) => {
         setSuites(data.suites);
+        setFlows(data.flows || []);
+        setModels(data.models || []);
+        setModel((current) => current || data.default_model || "");
         setEstimate(count ? data.estimate : null);
       })
       .catch(() => setSuites([]));
-  }, [count]);
+  }, [count, flow, model]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="card eval-setup">
@@ -580,6 +618,37 @@ function RunSetup({ onStart, onCancel }) {
             </label>
           ))}
         </div>
+
+        <div className="label">Flow</div>
+        <div className="options">
+          {flows.map((f) => (
+            <label key={f.id} className={`option ${flow === f.id ? "picked" : ""} ${f.ready ? "" : "disabled"}`}>
+              <input
+                type="radio"
+                name="eval-flow"
+                id={`eval-flow-${f.id}`}
+                checked={flow === f.id}
+                disabled={!f.ready}
+                onChange={() => setFlow(f.id)}
+              />
+              <div>
+                <div className="option-text">
+                  {f.name} {!f.ready && <span className="muted">· {f.note || "not built yet"}</span>}
+                </div>
+                <p className="muted small">{f.about}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+
+        <div className="label">Model</div>
+        <select className="select eval-model" aria-label="Model" value={model} onChange={(e) => setModel(e.target.value)}>
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name} · ${m.price_in} in / ${m.price_out} out per million tokens
+            </option>
+          ))}
+        </select>
 
         <div className="label">Which questions</div>
         <div className="eval-range">
@@ -645,7 +714,7 @@ function RunSetup({ onStart, onCancel }) {
             disabled={!chosen?.ready || starting || !valid}
             onClick={async () => {
               setStarting(true);
-              await onStart(suite, first, last);
+              await onStart(suite, first, last, flow, model);
               setStarting(false);
             }}
           >
@@ -662,7 +731,8 @@ function RunSetup({ onStart, onCancel }) {
 }
 
 // The run, live: progress, what it's doing now, accuracy so far, and each answer as it lands.
-function LiveRun({ run, onStop, onResume, onClose }) {
+// also used by Evaluation -> Comparison for the run a comparison is on (Version-22)
+export function LiveRun({ run, onStop, onResume, onClose }) {
   const [, tick] = useState(0);
   const running = run.status === "running";
   useEffect(() => {

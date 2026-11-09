@@ -11,6 +11,7 @@ from typing import List, Optional
 
 from backend.config import LLM_API_KEY, LLM_MODEL_SQL
 from backend.llm import chat, make_client
+from backend.text_to_sql.sql_generator import GRANULARITY_RULE_PLAIN, METRIC_RULE_PLAIN, TIME_PART_RULE_PLAIN, AVERAGE_RULE_PLAIN, VALUE_RULE_PLAIN
 
 MAX_STEPS = 8
 
@@ -37,6 +38,7 @@ SYSTEM_PROMPT = (
     "Never write 'optionally': decide. When the question or its hint "
     "defines how a value is formed (e.g. 'the month is the 5th and 6th characters of the date'), "
     "show that value in exactly that form.\n"
+    + GRANULARITY_RULE_PLAIN + METRIC_RULE_PLAIN + TIME_PART_RULE_PLAIN + AVERAGE_RULE_PLAIN + VALUE_RULE_PLAIN + "\n" +
     "Never plan to change, add or delete data: only read it.\n"
     'Return only JSON: {"steps": ["step 1 text", "step 2 text", ...]}'
 )

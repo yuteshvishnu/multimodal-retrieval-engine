@@ -17,6 +17,15 @@ Running one from the tab (Version-14, backend/eval_runner.py):
     POST /api/eval/checks              Version-21: run one question again (suite, question_id), from its issue
     GET  /api/eval/checks              that question's checks, newest first, and the one running now
 
+Comparing flows (Version-22): each run records its flow (Original, Full, Adaptive).
+
+    GET  /api/eval/compare             each flow's score on the same questions (suite, first, last; last 0 = to the end)
+    POST /api/eval/comparisons         run several flows on those questions, one after another (suite, first, last,
+                                       flows, reuse: skip a flow that already has a run covering them)
+    GET  /api/eval/comparisons/current the comparison being run, or the last one
+    POST /api/eval/comparisons/stop    stop after the current question
+    POST /api/eval/comparisons/resume  carry on from where it stopped
+
 A run is one JSON file: {"benchmark", "run_at", "model", "mode", "results": [one per question]}.
 The newest file in data/text_to_sql/eval/runs/ is shown; until a real run exists, a sample run
 (data/text_to_sql/eval/sample_bird_run.json, made-up questions in BIRD's format, "sample": true)
@@ -32,7 +41,8 @@ from typing import Dict, List
 from fastapi import APIRouter, Form, HTTPException
 
 from backend import usage
-from backend.eval_runner import EvalRunner, estimate, suites
+from backend.config import LLM_MODEL_SQL
+from backend.eval_runner import DEFAULT_FLOW, FLOWS, EvalRunner, estimate, flow_of, flows, models, suites
 from backend.text_to_sql.api import pipeline
 from backend.text_to_sql.pipeline import TextToSQLPipeline
 
@@ -93,6 +103,7 @@ def summarize(run: Dict) -> Dict:
     calls = sum(r.get("llm_calls", 0) for r in results)
     return {
         **{k: run.get(k) for k in ("suite", "benchmark", "note", "run_at", "model", "provider", "mode", "status")},
+        "flow": FLOWS.get(flow_of(run), {}).get("name"),  # Version-22
         "short": run.get("short") or "BIRD",
         "sample": bool(run.get("sample")),
         **score(results),
@@ -145,7 +156,7 @@ def bird_pipeline(folder: Path) -> TextToSQLPipeline:
     return TextToSQLPipeline(use_retrieval=False, data_dir=str(folder))
 
 
-runner = EvalRunner(pipeline, pipeline_for=bird_pipeline)
+runner = EvalRunner(pipeline, pipeline_for=bird_pipeline, practice_for=TextToSQLPipeline)
 
 
 def _runner() -> EvalRunner:
@@ -153,15 +164,19 @@ def _runner() -> EvalRunner:
 
 
 @router.get("/suites")
-def suites_endpoint(questions: int = 0):
-    return {"suites": suites(), "estimate": estimate(questions) if questions > 0 else None,
+def suites_endpoint(questions: int = 0, flows_to_run: str = "", model: str = LLM_MODEL_SQL):
+    # Version-22: flows_to_run = "original,full": the estimate for running each of them on those questions
+    chosen = [f for f in flows_to_run.split(",") if f in FLOWS] or None
+    return {"suites": suites(), "flows": flows(), "models": models(), "default_model": LLM_MODEL_SQL,
+            "estimate": estimate(questions, chosen, model) if questions > 0 else None,
             "running": _runner().busy()}
 
 
 @router.post("/runs")
-def start_endpoint(suite: str = Form(...), first: int = Form(1), last: int = Form(0)):
+def start_endpoint(suite: str = Form(...), first: int = Form(1), last: int = Form(0), flow: str = Form(DEFAULT_FLOW),
+                   model: str = Form(LLM_MODEL_SQL)):
     try:
-        return _runner().start(suite, first, last)
+        return _runner().start(suite, first, last, flow=flow, model=model)
     except RuntimeError as e:
         raise HTTPException(409, str(e))
     except ValueError as e:
@@ -232,3 +247,48 @@ def checks_endpoint(question_id: str):
         "checks": [_check_view(run) for run in r.checks(question_id)[:5]],
     }
 
+
+# ---------- Version-22: compare flows on the same questions ----------
+
+@router.get("/compare")
+def compare_endpoint(suite: str, first: int = 1, last: int = 0, model: str = LLM_MODEL_SQL):
+    try:
+        return _runner().compare(suite, first, last, model)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/comparisons")
+def start_comparison_endpoint(suite: str = Form(...), first: int = Form(1), last: int = Form(0), flows: str = Form(...),
+                              reuse: bool = Form(True), model: str = Form(LLM_MODEL_SQL)):
+    try:
+        return _runner().start_comparison(suite, first, last, [f for f in flows.split(",") if f], reuse, model=model)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/comparisons/current")
+def current_comparison_endpoint():
+    r = _runner()
+    return {"comparison": r.comparison(), "busy": r.busy()}
+
+
+@router.post("/comparisons/stop")
+def stop_comparison_endpoint():
+    r = _runner()
+    if not r.busy():
+        raise HTTPException(400, "No comparison is running.")
+    r.stop()
+    return {"stopping": True}
+
+
+@router.post("/comparisons/resume")
+def resume_comparison_endpoint():
+    try:
+        return _runner().resume_comparison()
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))

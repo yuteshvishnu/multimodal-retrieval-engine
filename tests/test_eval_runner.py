@@ -410,3 +410,206 @@ def test_an_unclosed_quote_is_an_sql_problem_not_a_crash():
     assert merged_records(sql, [], lambda s: ([], [])) == []
     assert write_problems(sql) == []  # unreadable, but no write keyword: SQLite decides if it's valid
     assert write_problems("DELETE FROM event WHERE name = 'Women's'") == ["DELETE"]
+
+
+# ---------- Version-22: flows and the Comparison tab ----------
+
+def scout_for_all(store, n=20):
+    """Answers every practice question with the one row its stand-in database gives."""
+    pipeline = fake_pipeline([{"rows": [[0]], "sql": "SELECT 0"}] * n, store, [])
+    pipeline.database = types.SimpleNamespace(run_all=lambda sql: (["n"], [[0]]))
+    return pipeline
+
+
+def save_run(runs, run_id, flow, run_at, answered, wrong=(), chains=None):
+    results = [{"id": i, "correct": i not in wrong, "llm_calls": 8 if chains else 5, "cost": 0.001, "confidence": "high",
+                "chains": chains(i) if chains else []} for i in answered]
+    (runs / f"{run_id}.json").write_text(json.dumps({
+        "id": run_id, "suite": "practice", "flow": flow, "run_at": run_at, "status": "finished",
+        "planned": answered, "results": results}))
+
+
+def test_a_run_records_its_flow_and_unknown_flows_are_refused(store, tmp_path):
+    from backend import eval_runner
+
+    runner = EvalRunner(fake_pipeline([{"rows": [[0]], "sql": "SELECT 0"}], store, []), tmp_path / "runs",
+                        sleep=lambda s: None)
+    progress = runner.start("practice", last=1, wait=True)
+    assert progress["flow"] == "original"
+    with pytest.raises(ValueError, match="Unknown flow"):
+        runner.start("practice", last=1, flow="magic")
+    assert eval_runner.flow_of({}) == "original"  # runs from before flows: the original flow
+
+
+def test_flows_are_compared_on_exactly_the_same_questions_in_any_range(store, tmp_path):
+    """A ring uses the flow's newest run that answered every question of the range: a longer run counts,
+    a shorter one doesn't. Full's saved chains give weak supervision, 3 chains and Adaptive, with no calls."""
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    ids = [q["id"] for q in load_questions("practice")]
+    save_run(runs, "a", "original", "2026-11-01T10:00:00", ids[:5], wrong=[ids[3]])
+    save_run(runs, "b", "original", "2026-11-02T10:00:00", ids[2:4])                    # newer, but too short
+
+    def chains(i):
+        # the first 2 chains disagree on ids[2], where only the last two are right
+        answers = ["x", "y", "right", "right"] if i == ids[2] else ["right", "right", "right", "right"]
+        return [{"chain": c, "status": "ok", "answer": a, "correct": a == "right"}
+                for c, a in zip(["direct", "explore", "plan", "shape"], answers)]
+
+    save_run(runs, "c", "full", "2026-11-03T10:00:00", ids[:5], chains=chains)
+    compared = EvalRunner(None, runs).compare("practice", 3, 5)
+    assert (compared["first"], compared["last"], compared["questions"]) == (3, 5, 3)
+    rings = {f["flow"]: f for f in compared["flows"]}
+    assert rings["original"]["run"]["id"] == "a" and rings["original"]["run"]["correct"] == 2
+    assert rings["full"]["run"]["id"] == "c" and rings["full"]["three_chains"] == 2  # on ids[2], 3 chains all differ
+    assert rings["full"]["misses"] == 0 and rings["full"]["average_chain"] == 83.3  # 10 of 12 chain answers
+    assert rings["full_ws"]["replayed"] and rings["full_ws"]["run"]["total"] == 3
+    adaptive = rings["adaptive"]
+    assert adaptive["replayed"] and adaptive["stopped_early"] == 2
+    assert adaptive["run"]["llm_calls"] == 4 + 8 + 4 and adaptive["run"]["calls_per_question"] == 5.3
+    assert [d["id"] for d in compared["differ"]] == [ids[3]]  # Original wrong, the others right
+    with pytest.raises(ValueError):
+        EvalRunner(None, runs).compare("practice", 5, 3)
+
+
+def test_every_try_and_chain_is_saved_with_whether_it_was_right(store, tmp_path):
+    pipeline = fake_pipeline([{"rows": [[0]], "sql": "SELECT 0", "confidence": "high", "attempts": [
+        {"sql": "SELECT 0", "status": "ok", "problems": [], "rows": [[0]]},
+        {"sql": "SELECT 7", "status": "ok", "problems": [], "rows": [[7]]},
+        {"sql": "SELEC", "status": "rejected", "problems": ["bad"], "rows": []},
+    ]}], store, [])
+    runner = EvalRunner(pipeline, tmp_path / "runs", sleep=lambda s: None)
+    progress = runner.start("practice", last=1, wait=True)
+    tries = json.loads((tmp_path / "runs" / f"{progress['id']}.json").read_text())["results"][0]["chains"]
+    assert [(t["chain"], t["status"], t["correct"]) for t in tries] == [
+        ("try 1", "ok", True), ("try 2", "ok", False), ("try 3", "rejected", False)]
+
+
+def test_a_comparison_runs_the_flows_one_after_another_and_reuses_runs(store, tmp_path, monkeypatch):
+    from backend import eval_runner
+
+    def stub_full(pipeline):
+        return types.SimpleNamespace(run=lambda question, tag, flow: {"rows": [[0]], "sql": "SELECT 0", "confidence": "high",
+                                                                 "attempts": []})
+
+    monkeypatch.setattr(eval_runner, "FlowRunner", stub_full)
+    runner = EvalRunner(scout_for_all(store), tmp_path / "runs", sleep=lambda s: None)
+    queue = runner.start_comparison("practice", 1, 0, ["original"], wait=True)
+    assert queue["status"] == "finished" and [i["status"] for i in queue["items"]] == ["done"]
+    first = queue["items"][0]["run_id"]
+
+    runner.pipeline = scout_for_all(store)
+    queue = runner.start_comparison("practice", 1, 0, ["original", "full"], wait=True)
+    assert [(i["flow"], i["status"]) for i in queue["items"]] == [("original", "reused"), ("full", "done")]
+    saved = json.loads((tmp_path / "runs" / "comparisons" / f"{queue['id']}.json").read_text())
+    assert saved["items"][1]["run_id"] == queue["items"][1]["run_id"]  # known while it ran, not only at the end
+    assert queue["items"][0]["run_id"] == first  # not run again
+    full = runner.load(queue["items"][1]["run_id"])
+    assert full["flow"] == "full" and len(full["results"]) == 20
+    # a part of the suite: the runs cover it, and a new comparison starts at the range asked for
+    queue = runner.start_comparison("practice", 3, 5, ["original", "full"], reuse=False, wait=True)
+    run = runner.load(queue["items"][0]["run_id"])
+    assert run["range"] == [3, 5] and len(run["results"]) == 3
+    with pytest.raises(ValueError, match="Pick at least one"):
+        runner.start_comparison("practice", 1, 0, [])
+
+
+def test_adaptive_can_run_on_its_own_and_its_newer_live_run_is_the_one_shown(store, tmp_path, monkeypatch):
+    from backend import eval_runner
+
+    seen = []
+
+    def stub(pipeline):
+        def run(question, tag, flow):
+            seen.append(flow)
+            return {"rows": [[0]], "sql": "SELECT 0", "confidence": "high", "attempts": [
+                {"chain": "direct", "style": "simple", "status": "ok", "sql": "SELECT 0", "answer": "a", "rows": [[0]]},
+                {"chain": "explore", "style": "data", "status": "ok", "sql": "SELECT 0", "answer": "a", "rows": [[0]]},
+            ]}
+        return types.SimpleNamespace(run=run)
+
+    monkeypatch.setattr(eval_runner, "FlowRunner", stub)
+    runner = EvalRunner(scout_for_all(store), tmp_path / "runs", sleep=lambda s: None)
+    queue = runner.start_comparison("practice", 2, 4, ["adaptive"], wait=True)  # no Original, no Full
+    assert [(i["flow"], i["status"]) for i in queue["items"]] == [("adaptive", "done")] and set(seen) == {"adaptive"}
+    rings = {f["flow"]: f for f in runner.compare("practice", 2, 4)["flows"]}
+    assert rings["adaptive"]["run"]["total"] == 3 and not rings["adaptive"].get("replayed")
+    assert rings["original"]["run"] is None and rings["full"]["run"] is None
+
+
+def test_each_model_has_its_own_rings_scouts_and_estimate(store, tmp_path, monkeypatch):
+    from backend import eval_runner
+    from backend.config import EVAL_MODELS, LLM_MODEL_SQL
+
+    assert [m["name"] for m in EVAL_MODELS] == ["Llama 3.1 8B", "GPT-OSS 20B", "Gemma 4 31B", "Llama 3.3 70B", "GPT-OSS 120B"]
+    assert LLM_MODEL_SQL == EVAL_MODELS[-1]["id"]  # what every earlier run used stays the default
+    monkeypatch.setattr(eval_runner, "LLM_PROVIDER", "openrouter")
+    monkeypatch.setattr(eval_runner, "LLM_PRICES", {"openai/gpt-oss-120b": (1, 1), "openai/gpt-oss-20b": (2, 2)})
+    small, big = "openai/gpt-oss-20b", LLM_MODEL_SQL
+    assert eval_runner.estimate(10, ["original"], small)["cost"] == 2 * eval_runner.estimate(10, ["original"], big)["cost"]
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    ids = [q["id"] for q in load_questions("practice")]
+    save_run(runs, "old", "original", "2026-11-01T10:00:00", ids[:3], wrong=[ids[0]])  # no model saved: the default
+    (runs / "small.json").write_text(json.dumps({"id": "small", "suite": "practice", "flow": "original", "model": small,
+        "run_at": "2026-11-02T10:00:00", "status": "finished", "planned": ids[:3],
+        "results": [{"id": i, "correct": True, "llm_calls": 5, "cost": 0, "confidence": "high"} for i in ids[:3]]}))
+    runner = EvalRunner(None, runs)
+    ring = lambda model: next(f for f in runner.compare("practice", 1, 3, model)["flows"] if f["flow"] == "original")["run"]
+    assert ring(big)["id"] == "old" and ring(small)["id"] == "small"  # a newer small-model run never replaces it
+
+    def scout(folder=None):
+        part = lambda: types.SimpleNamespace(model_name=big)
+        return types.SimpleNamespace(generator=part(), interpreter=part(), planner=part())
+
+    made = EvalRunner(scout(), runs, practice_for=scout)
+    other = made.pipeline_for_db("practice", "retail_store", small)
+    assert other is not made.pipeline and made.pipeline.generator.model_name == big  # the app's Scout is untouched
+    assert (other.generator.model_name, other.interpreter.model_name, other.planner.model_name) == (small, small, small)
+    assert made.pipeline_for_db("practice", "retail_store", small) is other  # made once
+    with pytest.raises(ValueError, match="Unknown model"):
+        made.start("practice", last=1, model="some/other-model")
+
+
+def test_scoring_compares_values_exactly_as_birds_own_scorer_does():
+    from backend.eval_runner import as_set
+
+    assert as_set([[1], [2], [2]]) == as_set([[2], [1]])  # any order, repeats ignored
+    assert as_set([[66.62300807]]) != as_set([[66.62300808]])  # no rounding
+    assert as_set([[1.0]]) == as_set([[1]])  # Python's set() treats these as equal, in BIRD's scorer too
+    assert as_set([["202.484"]]) != as_set([[202.484]])  # text isn't a number
+
+
+def test_mixed_has_one_ring_with_weak_supervision_and_the_majority_beside_it(store, tmp_path, monkeypatch):
+    from backend import eval_runner
+
+    monkeypatch.setitem(eval_runner.FLOWS, "mixed", {**eval_runner.FLOWS["mixed"], "ready": True})
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    ids = [q["id"] for q in load_questions("practice")]
+
+    def chains(i):
+        answers = ["x", "right", "right", "x"] if i == ids[0] else ["right"] * 4
+        return [{"chain": c, "status": "ok", "answer": a, "correct": a == "right"}
+                for c, a in zip(["A", "B", "C", "D"], answers)]
+
+    save_run(runs, "m", "mixed", "2026-11-06T10:00:00", ids[:5], wrong=[ids[0]], chains=chains)
+    ring = next(f for f in EvalRunner(None, runs).compare("practice", 1, 5)["flows"] if f["flow"] == "mixed")
+    assert ring["name"] == "Mixed + weak supervision" and ring["majority"] == 4 and ring["run"]["model"] == "4 models"
+    assert {c["chain"]: c["correct"] for c in ring["chains"]} == {"A": 4, "B": 5, "C": 5, "D": 4}
+    assert ring["run"]["total"] == 5
+    # shown whichever model is chosen: it has its own
+    other = EvalRunner(None, runs).compare("practice", 1, 5, "openai/gpt-oss-20b")
+    assert next(f for f in other["flows"] if f["flow"] == "mixed")["run"]["id"] == "m"
+    assert eval_runner.estimate(10, ["mixed"])["cost"] > 0
+
+
+def test_a_mixed_run_with_other_models_cannot_be_resumed(store, tmp_path):
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    ids = [q["id"] for q in load_questions("practice")]
+    (runs / "old.json").write_text(json.dumps({"id": "old", "suite": "practice", "flow": "mixed", "status": "stopped",
+        "models": ["a", "b", "c", "d"], "run_at": "2026-11-06T00:00:00", "planned": ids[:3], "results": []}))
+    with pytest.raises(ValueError, match="start a new one"):
+        EvalRunner(None, runs).resume("old")
